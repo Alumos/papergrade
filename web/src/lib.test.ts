@@ -1,0 +1,5 @@
+import { describe, it, expect } from 'vitest';
+import { parseRoster, score, terminal } from './lib';
+describe('教师名册 CSV', () => { it('保留前导零并接受中英文标题及Windows换行', () => { expect(parseRoster('学号,姓名\r\n001,张同学\r\n002,李同学')).toEqual([{ number: '001', name: '张同学' }, { number: '002', name: '李同学' }]); expect(parseRoster('number,name\n0009,Jane')[0].number).toBe('0009'); }); it('处理引用逗号、双引号及制表符', () => { expect(parseRoster('"003","王,同学"')[0].name).toBe('王,同学'); expect(parseRoster('004\t李同学')[0].number).toBe('004'); expect(parseRoster('005,"a""b"')[0].name).toBe('a"b'); }); it('拒绝重复、缺列、未闭引号', () => { expect(() => parseRoster('001,A\n001,B')).toThrow('重复'); expect(() => parseRoster('001')).toThrow('学号,姓名'); expect(() => parseRoster('"001,A')).toThrow('未闭合'); }); });
+describe('真实状态与分值', () => { it('仅终态结束轮询', () => { expect(terminal('queued')).toBe(false); expect(terminal('processing')).toBe(false); for (const status of ['committed', 'needs_review', 'duplicate', 'conflict', 'failed'])
+    expect(terminal(status)).toBe(true); }); it('整数分值单位显示', () => { expect(score(125)).toBe('1.25'); expect(score(undefined)).toBe('—'); }); });

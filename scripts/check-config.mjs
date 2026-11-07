@@ -1,0 +1,14 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+const env = fs.readFileSync('.env.example','utf8');
+const compose=fs.readFileSync('compose.yaml','utf8');
+const docker=fs.readFileSync('Dockerfile','utf8');
+assert(compose.includes('LOCAL_OMR_ENABLED: "false"'), 'local OMR must be opt-in');
+assert(!docker.includes('poppler')&&!docker.includes('tesseract'), 'no local OCR/PDF runtime');
+assert(compose.includes('read_only: true'), 'application root must be read-only');
+assert(!compose.includes('5432:5432'), 'do not publish database');
+assert(compose.includes('PUBLIC_ORIGIN:'), 'production exact Origin required');
+assert(env.includes('CARD_ENDPOINT='), 'cloud card gateway config required');
+const pkg=JSON.parse(fs.readFileSync('web/package.json','utf8'));
+assert(pkg.packageManager.startsWith('pnpm@'), 'lock package manager version');
+console.log('Static cloud-first deployment guards passed (NOT a Docker runtime test).');

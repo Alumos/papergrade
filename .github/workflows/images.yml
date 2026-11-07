@@ -1,0 +1,92 @@
+name: Publish Docker images
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_USER: papergrade
+          POSTGRES_DB: papergrade_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U papergrade -d papergrade_test" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://papergrade@localhost:5432/papergrade_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test backend before publishing
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./... && go test -race -count=1 ./...
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile && pnpm run test && pnpm run build
+        working-directory: web
+      - name: Test PostgreSQL API and Worker persistence
+        run: |
+          go build -trimpath -o /tmp/papergrade-e2e ./cmd/papergrade
+          PAPERGRADE_BINARY=/tmp/papergrade-e2e node scripts/postgres-e2e.mjs
+      - name: Normalize registry image name
+        id: names
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: echo "image=ghcr.io/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ steps.names.outputs.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha
+      - name: Publish Go API and Worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: app
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+      - name: Gateway tags
+        id: gateway
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          { echo 'tags<<EOF'; printf '%s\n' "$TAGS" | sed 's/$/-gateway/'; echo EOF; } >> "$GITHUB_OUTPUT"
+      - name: Publish static frontend and HTTPS gateway
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: gateway
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.gateway.outputs.tags }}
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,mode=max,scope=gateway

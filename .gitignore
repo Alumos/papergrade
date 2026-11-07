@@ -1,0 +1,21 @@
+# Secrets and runtime evidence
+.env
+.env.*
+!.env.example
+secrets/*
+!secrets/.gitkeep
+data/
+.local/
+.cache/
+.tmp/
+node_modules/
+web/dist/
+web/coverage/
+# Local browser validation captures (kept locally, not shipped as source)
+web/*.png
+__pycache__/
+*.pyc
+coverage.out
+*.log
+.DS_Store
+bin/

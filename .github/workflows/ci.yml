@@ -1,0 +1,104 @@
+name: Test and build
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_USER: papergrade
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: papergrade_test
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U papergrade -d papergrade_test" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://papergrade@localhost:5432/papergrade_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go mod download
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Test PostgreSQL API and Worker persistence
+        run: |
+          go build -trimpath -o /tmp/papergrade-e2e ./cmd/papergrade
+          PAPERGRADE_BINARY=/tmp/papergrade-e2e node scripts/postgres-e2e.mjs
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - run: pnpm run test
+        working-directory: web
+      - run: pnpm run build
+        working-directory: web
+      - run: node scripts/check-config.mjs
+  docker-check:
+    runs-on: ubuntu-latest
+    needs: [go, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - run: docker compose --env-file .env.example config --quiet
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: app
+          load: true
+          tags: papergrade:ci
+          push: false
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: gateway
+          load: true
+          tags: papergrade:ci-gateway
+          push: false
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,mode=max,scope=gateway
+      - name: Start disposable production containers
+        env:
+          IMAGE: papergrade:ci
+        run: |
+          docker compose --project-name papergrade-ci --env-file .env.example up -d --wait postgres
+          docker compose --project-name papergrade-ci --env-file .env.example run --rm api migrate
+          docker compose --project-name papergrade-ci --env-file .env.example up -d --no-build --wait --wait-timeout 60 api worker
+          docker compose --project-name papergrade-ci --env-file .env.example exec -T api papergrade healthcheck
+          docker run --rm papergrade:ci-gateway caddy validate --config /etc/caddy/Caddyfile
+      - name: Collect container diagnostics
+        if: always()
+        env:
+          IMAGE: papergrade:ci
+        run: docker compose --project-name papergrade-ci --env-file .env.example logs --tail=100
+      - name: Remove disposable CI containers and test volumes
+        if: always()
+        env:
+          IMAGE: papergrade:ci
+        run: docker compose --project-name papergrade-ci --env-file .env.example down -v

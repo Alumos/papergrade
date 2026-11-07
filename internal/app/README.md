@@ -1,0 +1,39 @@
+# Backend MVP implementation notes
+
+Commands from project root: `go run ./cmd/papergrade migrate`, `api`, `worker`, `healthcheck` (unauthenticated localhost:8080/readyz with 3-second timeout; useful in containers).
+
+## Configuration
+
+- Production requires DATABASE_URL, ADMIN_USERNAME, ADMIN_PASSWORD (12–72 bytes), PUBLIC_ORIGIN (e.g. https://grade.example.com, exact origin, no trailing slash).
+- DATA_DIR defaults to ./data, must be a private writable persistent directory shared by API/worker; not web root.
+- SERVER_ADDR defaults :8080. Secure HttpOnly SameSite=Strict host cookies; mutations including login require Origin. Proxy uses PUBLIC_ORIGIN; no arbitrary forwarded Host trust.
+- DEV_MODE=true is explicit opt-in. Without DATABASE_URL repository is ephemeral memory, empty at restart. Insecure cookies and HTTP mutation Origin accepted only loopback host. Never production durability. API synchronously processes cloud requests in memory mode; separate worker refuses memory.
+- CARD_ENDPOINT/CARD_API_KEY implements provider card-v1 gateway, not arbitrary OCR. Default recognition cloud. Without gateway capture POST returns real 503 before accepting an image. LOCAL_OMR_ENABLED=true AND DEV_MODE=true enables experimental local OMR fallback only; no production accuracy claim.
+- OCR_ENDPOINT/OCR_API_KEY and AI_BASE_URL/AI_API_KEY/AI_MODEL configure PDF cloud extraction/analysis. Missing either parse returns 503. No local PDF executable/model. Artifact is a proposal, never silently adopts into draft.
+- DB_MAX_CONNS allowed 1–3; production API default3, worker set1. Minimum0. One worker job at a time. Idle queue polling backs off1/2/4s, lease240s, capture timeout100s/parse180s; generations fence stale commits. Failures retry at most3; interruptions beyond3 dead-letter, not infinite re-execution. No guarantee external provider exactly-once or free retries.
+- Runtime defaults GOMAXPROCS=1 and soft GOMEMLIMIT=96MiB unless environment overrides. This is NOT RSS bound or measured capacity. Cloud path DecodeConfig only (no full image decoding); local experiment can use significantly more memory.
+
+## Storage and business invariants
+
+PostgreSQL stores individual typed entities as JSONB rows (classes/students/exams/releases/captures/results/history/sessions/documents), with PK(kind,id), unique(kind,parent,unique_key), indexed lookups. Never one full-app JSON. One installation writer advisory lock protects cross-row invariants; GET uses read-only repeatable-read snapshots without writer lock. This favors correctness for a single teacher, not a multi-tenant high-throughput schema. Runtime migrate uses embedded SQL matching migrations/001_initial.sql. No automatic destructive migration.
+
+Atomic roster import (1–500 per request, <=1000/class) rejects all duplicates; student number strings retain leading zeros. Release freezes roster/template/questions/answers; drafts optimistic revision, published changes rejected. Up to40 objective questions,2–5 options, integer100 units/point. Partial multiple-choice scoring is fixed units for a nonempty strict subset only; any wrong option zero. Uncertain/missing answers enter needs_review, not final zero. All scores computed server-side.
+
+Captured image JPEG/PNG <=4MiB <=8MP; one upload slot; global pending capture cap20. Multipart uses disk spill after1MiB (temporary files removed), image byte buffer <=4MiB cloud path. Private random object fsync+rename+directory fsync before database references. Failed DB transactions or duplicate retries can leave **unreferenced durable objects**; currently no automatic cleanup or evidence retention/deletion policy implemented. Operators must monitor disk and implement safe orphan reconciliation before prolonged use; never blindly delete referenced evidence. Images are not stored in JSON/database.
+
+Idempotency key must equal client_capture_id; same key+different hash409; same key returns original capture. Candidate token cannot authorize identity. Gateway must read QR/geometry itself; server checks opaque random QR belongs frozen release. Exactly one effective result unique per exam/student. Repeated same answers duplicate; different answers conflict and never overwrite. Conflict replacement deferred. Review requires all selected answer sets, expected revision and reason; history retains previous result and reason. Provider receives no answer key/score.
+
+Result response also includes question_stats with per-option counts, full-score/blank/uncertain counts and score units totals. CSV includes missing students and quotes potentially formula-leading text; summary averages only finalized committed results. PDF20MiB, max10/exam, signature validated locally; full PDF safety/page validation delegated configured gateway (max30 pages), no claim arbitrary PDF is sanitized.
+
+## API additions / honest deferrals
+
+- Document multipart field `file`. `POST /exams/{id}/parse {document_id}` stores queued task in PostgreSQL; development synchronous result. GET document list polls status uploaded/queued/processing/parsed/failed. Artifact {extraction,analysis,requires_teacher_confirmation:true}, failure {error}. No automatic question adoption; explicit POST /exams/{id}/documents/{docid}/adopt {revision,replace_existing?} returns {exam,imported,skipped,warnings,requires_teacher_confirmation:true}. Draft-only, existing questions require replace_existing:true. Unsupported items reported; missing score remains0 and answer remains[], with review_flags; publish rejects incomplete fields. Draft replacement history is retained.
+- Authenticated `GET /documents/{id}/file` returns PDF; `GET /captures/{id}/image` returns evidence for review.
+- `POST /exams/{id}/regrade {revision,answers:[{question_id,answer}],reason}` explicitly corrects the complete objective key. Returns {exam,updated_results,grading_version}. Published release/template/roster never changes; grading_version history and each previous result retained, exam/result revisions increment atomically, needs_review remains pending. In-flight capture commits re-read the latest grading rules under writer lock. GET /exams/{id}/grading-history returns {items}. Regrading only changes answers, not geometry or points.
+- Statistics are bounded per-exam full result response (1000 students max); no pagination UI or XLSX, bulk multi-student print, retention UI, advanced budget ledger, or production provider-specific SDK claimed.
+
+## Validation
+
+Implementation-host results: `go test -mod=readonly ./...` PASS; backend `go test -race` PASS; `go vet ./...` PASS. Real `go run` development API login/credentialed class read/origin rejection and `healthcheck` smoke PASS. Lead subsequently ran a real isolated PostgreSQL17.6 instance on this host: rollback/unique constraints/second-pool committed durability/lease fencing/three-crash dead-letter bounds PASS, including store race tests. The earlier no-URL run correctly skipped; this later real instance validation supersedes that gap. Lead also verified real PostgreSQL API+Worker E2E: durable202 queue → cloud-protocol fixture recognition → committed200 units → idempotency → explicit regrade0 units → API restart retaining0 units. Full TEST_DATABASE_URL race and vet passed. The gateway was a protocol fixture, not a claim of production cloud/device accuracy. This does not imply Docker deployment was tested.
+
+`go test ./...` / `go test -race ./internal/app ./internal/store ./internal/grading`. Set TEST_DATABASE_URL to an **isolated disposable** PostgreSQL database for actual migration/rollback/unique/lease-fencing tests; absent URL test explicitly SKIPs. Do not call memory tests PostgreSQL validation. Docker unavailable on implementation host; deployment/DB claims require separate real execution. HTTP tests use real httptest gateway network requests, not claimed production cloud accuracy. Local vision synthetic tests are not phone/device accuracy evidence.

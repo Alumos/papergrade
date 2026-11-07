@@ -1,0 +1,16 @@
+.git
+.env
+.env.*
+secrets
+data
+.local
+.cache
+.tmp
+**/node_modules
+web/dist
+web/coverage
+web/*.png
+__pycache__
+*.pyc
+bin
+*.log
