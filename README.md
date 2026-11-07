@@ -54,7 +54,7 @@ Vite仅供localhost开发，/api代理到8080。访问http://localhost:5173。�
 
 四个常驻服务：HTTPS静态网关、Go API、轻量Worker、PostgreSQL。无Node生产运行时、无Redis/MinIO。容器内存上限合计640MiB是故障保护，不是预分配、真实RSS或资源达标证明。生产镜像不包含本地OCR模型/PDF工具。
 
-仓库根是papergrade目录。已准备CI测试和GHCR多架构镜像构建发布配置；尚未创建远程仓库、上传GitHub、执行远程Actions。需用户确认仓库位置/可见性后才能推送。开发主机无Docker，Compose和镜像需要CI/目标VPS验证，不能伪称本地Docker通过。
+代码仓库：[Alumos/papergrade](https://github.com/Alumos/papergrade)。推送 main 自动执行 Go / PostgreSQL 与前端测试、Docker 构建及一次性容器检查；发布 v* 标签或手动运行 Publish Docker images 时构建并推送 GHCR 的 linux/amd64、linux/arm64 镜像。当前构建状态见 [GitHub Actions](https://github.com/Alumos/papergrade/actions)，不能把代码已上传当作镜像已发布。开发主机无 Docker，容器运行以 CI / 目标 VPS 的真实结果为准。
 
 ## 明确首版边界
 
