@@ -44,6 +44,7 @@ Vite仅供localhost开发，/api代理到8080。访问http://localhost:5173。�
 
 - [最新低资源约束](<docs/LOW_MEMORY_REVISION.md>)：覆盖原设计的默认路径。
 - [部署与GHCR](<docs/DEPLOYMENT.md>)：2C4G资源保险帽、域名、卷、备份与升级。
+- **[OCR / OpenAI 模型接入步骤](<docs/MODEL_SETUP.md>)**：配置位置、URL格式、重建容器、协议限制和所缺厂商适配。
 - [云端接口契约](<docs/CLOUD_PROVIDERS.md>)：OCR、AI、答题卡识别配置及隐私/费用边界。
 - [实施API契约](<docs/IMPLEMENTATION_CONTRACT.md>)。
 - [验证记录与尚未验收范围](<docs/VALIDATION.md>)。
