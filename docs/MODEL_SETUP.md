@@ -12,56 +12,53 @@
 
 上述 AI 配置不会自动开启 PDF 视觉识别。当前系统不把 PDF 当文本发给 /chat/completions，也没有把答题卡图送给文本模型猜填涂。模型能读图不等于当前适配器已支持其多模态协议。
 
-## 2. 配置放在哪里
+## 2. 后台配置（推荐，不用反复改部署文件）
 
-当前从部署机器的 .env 读取，由 Compose 传入 api 和 worker。**不是在前端填写，也不是 GitHub 仓库 Secrets**；仓库不需要保存你真实的模型密钥，Actions 构建镜像也不需要模型密钥。
+登录系统 → 顶部 **设置** → **模型与服务设置** → 分别选择 OCR、AI 模型、答题卡网关。当前单教师部署中，唯一教师账号兼任管理员；尚不是多角色学校管理系统。
 
-当前教师页面仅显示能力状态，没有实现网页后台修改供应商地址 / 密钥的设置页。
+1. 输入 OCR / 答题卡网关完整 URL，或 AI 的 API Base URL 与模型名。
+2. API Key 填在独立密码框。已有密钥仅显示“已配置”，不会从服务端回传。
+3. 空密钥表示保留原密钥；只有勾选“清除已有密钥”才会删除。填写新密钥和清除同时选择会被拒绝。
+4. 点击保存并确认。配置写入 PostgreSQL，带 revision 并发检查，版本过期返回409且保留本地输入；先重新读取再核对，不自动覆盖别人修改。
+5. 保存成功后 API 和 Worker **下一次云端调用读取最新配置**，不需重启容器、重新打包或修改部署文件。已经发出的请求使用原配置继续执行，不强行中断。
+6. 点击“测试已保存配置”显式检查地址/鉴权。AI 使用 GET /models，OCR / 卡网关使用 HEAD，限时8秒，不上传试卷、不请求模型推理。405代表接口可达但不支持此探测，不等于识别失败。通过也不证明模型ID、JSON推理协议和识别准确率已验收。
 
-在仓库根复制 .env.example 为 .env 后，编辑：
+URL只允许HTTPS，loopback测试服务可HTTP；拒绝URL中内嵌用户密码、query和fragment，密钥必须放独立字段。不要仅为消除“未配置”提示而填一个未适配地址。
 
-~~~dotenv
-# 这里给的是格式样例。替换为你的域名及账号，不能照抄示例密钥。
-DOMAIN=grade.your-domain.example
-ADMIN_USERNAME=teacher
-ADMIN_PASSWORD=replace-with-your-own-long-random-password
-POSTGRES_PASSWORD=replace-with-your-own-random-hex-password
+### 首次部署仍需一个应用加密主密钥
 
-# OpenAI-compatible文本模型：填写“基址”，不包含/chat/completions
-AI_BASE_URL=https://your-model-provider.example/v1
-AI_API_KEY=replace-with-your-model-api-key
-AI_MODEL=replace-with-the-exact-model-id
-
-# 原卷OCR：仅在接好对应网关后填写完整接口URL
-OCR_ENDPOINT=https://your-ocr-gateway.example/extract
-OCR_API_KEY=replace-with-your-ocr-gateway-key
-
-# 学生卡：专用card-v1网关，与原卷OCR分开
-CARD_ENDPOINT=https://your-card-gateway.example/recognize
-CARD_API_KEY=replace-with-your-card-gateway-key
-
-LOCAL_OMR_ENABLED=false
-~~~
-
-不同服务可用不同密钥。不要把空的或未适配的 endpoint 用随便一个地址填满以消除“未配置”提示。所有外部端点必须 HTTPS，HTTP 仅允许本机 loopback 测试。
-
-如果使用 OpenAI 官方服务，AI_BASE_URL 的格式是 https://api.openai.com/v1；AI_MODEL 必须是你的账号实际有权调用且支持下述参数的模型 ID。兼容供应商则填它自己提供的基址和 ID，不能保证仅凭“兼容OpenAI”宣传就完全支持当前请求。
-
-**修改 .env 后要重建容器环境，不只是 restart：**
+模型地址、模型名和供应商密钥不必在部署时设置。但为了安全保存它们，基础设施首次部署需要配置 **APP_ENCRYPTION_KEY**（不是模型API Key）：
 
 ~~~sh
-# 已经部署并完成数据库迁移的实例
-# 此命令会重建api/worker，扫描时应先暂停并等待在途任务完成。
-docker compose up -d --no-build --force-recreate api worker
-# 不要输出.env内容或docker inspect环境变量到公开日志
-docker compose logs --tail=80 api worker
+openssl rand -hex 32
 ~~~
 
-首次部署先配置镜像与基础数据库，再按部署说明 migrate。修改云端密钥不需要重新打包前端或构建镜像。不要 down -v，避免误删数据库及证据卷。
+将生成值只写入部署机的私有 .env 中 APP_ENCRYPTION_KEY，确保 api 和 worker 使用同一个稳定值。它至少32字节，服务端派生AES-256-GCM密钥，以随机nonce与AAD加密整份配置；数据库与审计不写明文供应商密钥。不要把真实主密钥写入仓库、镜像或公开日志。
+
+**主密钥必须单独备份，重启和升级不可随意更换。** 丢失或更换后既有配置无法解密，系统明确503而不是悄悄使用旧环境变量。当前未实现自动主密钥轮换；应在保有旧密钥时规划迁移，不能靠重新生成替代。备份数据库时同时安全保存该密钥，但不要放在同一份未加密公开归档。
+
+已有部署升级时，只需一次加入主密钥并更新版本/重建api和worker。以后日常模型设置全在后台完成。
+
+~~~sh
+# 初次升级到后台模型设置版本，先暂停扫描并等在途任务完成
+# 先在 .env 配置稳定 APP_ENCRYPTION_KEY，及正确 IMAGE、域名、账号等基础设施
+# 模型相关变量可以留空
+docker compose pull
+docker compose run --rm api migrate
+docker compose up -d --no-build --force-recreate api worker gateway
+~~~
+
+DEV_MODE + 内存开发模式无主密钥时使用临时随机密钥并醒目警告：重启丢配置，不能用于正式考试。只要使用PostgreSQL，开发模式也必须配置稳定主密钥；生产无主密钥会拒绝启动。
+
+### 兼容旧部署的环境引导
+
+OCR_ENDPOINT/OCR_API_KEY、AI_BASE_URL/AI_API_KEY/AI_MODEL、CARD_ENDPOINT/CARD_API_KEY 保留为**首次后台保存之前**的可选引导配置。后台保存过一次后，整份数据库配置优先；清空某一服务表示禁用，不会再用环境值把它重新启用。界面显示来源为“后台配置”或“环境引导配置”。
+
+不需要在 GitHub Actions Secrets 中保存模型密钥，CI 构建与测试使用一次性测试主密钥，不调用你的真实模型。
 
 ## 3. AI 接口准确契约
 
-系统请求：AI_BASE_URL 去掉末尾 / 后，再拼接 /chat/completions。例如基址 https://provider.example/v1 会请求 https://provider.example/v1/chat/completions。
+系统请求：后台 AI Base URL（旧部署对应 AI_BASE_URL）去掉末尾 / 后，再拼接 /chat/completions。例如基址 https://provider.example/v1 会请求 https://provider.example/v1/chat/completions。
 
 - Authorization: Bearer AI_API_KEY
 - 请求体包括 model、messages、temperature:0、max_tokens:6000、response_format:{type:json_object}。
@@ -113,7 +110,7 @@ CARD_ENDPOINT 接收 multipart image + template，响应 token、每题 selected
 
 ## 6. 配好以后怎么操作
 
-1. 教师登录，确认页面AI/OCR状态。注意此处目前仅检查配置是否非空，不会主动付费探测，**“已配置”不等于连通测试成功**。
+1. 教师登录，确认页面AI/OCR状态。注意此处目前仅检查配置是否非空，页面加载不自动探测，点击测试按钮才检查地址/鉴权；**“已配置”不等于连通测试或识别成功**。
 2. 创建班级 / 名册，再创建考试草稿。
 3. 在“PDF与解析”上传原卷，选择文件，点击解析。原卷OCR与AI两者都配好才会受理解析任务。
 4. worker调用OCR，再调用AI；页面轮询 uploaded → queued → processing → parsed / failed。
@@ -126,7 +123,7 @@ CARD_ENDPOINT 接收 multipart image + template，响应 token、每题 selected
 
 | 现象 | 检查 |
 |---|---|
-| PROVIDER_NOT_CONFIGURED / 503 | OCR+AI解析缺一个，或扫卡缺CARD；确认api/worker均已force-recreate |
+| PROVIDER_NOT_CONFIGURED / 503 | OCR+AI解析缺一个，或扫卡缺CARD；确认后台保存成功，API/Worker连接同一数据库且主密钥一致 |
 | 页面显示已配置但parsed失败 | 非空状态不验证鉴权，检查URL、密钥权限、协议与模型参数 |
 | AI 401 / 403 | key、账号余额/权限、模型访问范围、网关鉴权方式 |
 | AI 404 | 不要在AI_BASE_URL里重复/chat/completions，核对/v1和模型ID |
@@ -135,7 +132,7 @@ CARD_ENDPOINT 接收 multipart image + template，响应 token、每题 selected
 | PDF一直queued | worker未运行、数据库不同、队列失败，查看api/worker日志 |
 | CARD已配置但识别失败 | 协议不符、码未读出、题ID/选项/状态不完整、不属于当前考试 |
 
-应用错误会脱敏，不把供应商密钥/完整错误响应写到教师界面。当前尚没有专门的管理员连通测试页和详细供应商调用看板，这是需要继续补的功能，不应暗示已经存在。
+应用错误会脱敏，不把供应商密钥/完整错误响应写到教师界面。后台已提供显式地址/鉴权测试，但不执行推理或上传真实文件；详细调用看板、厂商原生适配和真实推理验收仍需继续补齐。
 
 ## 8. 下一步需要你提供的非密钥信息
 

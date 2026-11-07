@@ -18,17 +18,20 @@ import (
 	"time"
 )
 
-func (a *App) localOMR() bool          { return a.Config.Dev && os.Getenv("LOCAL_OMR_ENABLED") == "true" }
-func (a *App) cloud() *provider.Client { return provider.New(provider.ConfigFromEnv()) }
-func (a *App) capabilities() map[string]any {
-	p := a.cloud().Capabilities()
+func (a *App) localOMR() bool { return a.Config.Dev && os.Getenv("LOCAL_OMR_ENABLED") == "true" }
+func (a *App) capabilities(ctx context.Context) map[string]any {
+	client, e := a.cloud(ctx)
+	p := map[string]bool{}
+	if e == nil {
+		p = client.Capabilities()
+	}
 	mode := "disabled"
 	if p["card_configured"] {
 		mode = "cloud"
 	} else if a.localOMR() {
 		mode = "local_experimental"
 	}
-	return map[string]any{"ocr_configured": p["ocr_configured"], "ai_configured": p["ai_configured"], "card_recognition_configured": p["card_configured"], "recognition_mode": mode, "local_omr_enabled": a.localOMR(), "storage_mode": a.Store.Mode(), "regrade_available": true, "document_adopt_available": true, "max_capture_bytes": 4 << 20, "max_questions": 40, "score_units_per_point": 100}
+	return map[string]any{"ocr_configured": p["ocr_configured"], "ai_configured": p["ai_configured"], "card_recognition_configured": p["card_configured"], "recognition_mode": mode, "local_omr_enabled": a.localOMR(), "storage_mode": a.Store.Mode(), "regrade_available": true, "document_adopt_available": true, "max_capture_bytes": 4 << 20, "max_questions": 40, "score_units_per_point": 100, "provider_settings_available": e == nil, "provider_settings_configurable": a.providerCipher != nil}
 }
 func publicCapture(c Capture) Capture { c.Path = ""; c.Hash = ""; c.Candidate = ""; return c }
 func (a *App) registerCaptures(m *http.ServeMux) {
@@ -53,7 +56,12 @@ func (a *App) registerCaptures(m *http.ServeMux) {
 		}
 	})
 	m.HandleFunc("POST /api/v1/exams/{id}/captures", func(w http.ResponseWriter, r *http.Request) {
-		if !a.cloud().Capabilities()["card_configured"] && !a.localOMR() {
+		client, err := a.cloud(r.Context())
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if !client.Capabilities()["card_configured"] && !a.localOMR() {
 			fail(w, &APIError{503, "PROVIDER_NOT_CONFIGURED", "cloud card recognition is not configured; no capture accepted"})
 			return
 		}
@@ -185,12 +193,16 @@ func (a *App) registerCaptures(m *http.ServeMux) {
 }
 func (a *App) recognize(ctx context.Context, raw []byte, ex Exam) (string, []grading.Answer, error) {
 	out := []grading.Answer{}
-	if a.cloud().Capabilities()["card_configured"] {
+	client, err := a.cloud(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	if client.Capabilities()["card_configured"] {
 		qs := []provider.CardQuestion{}
 		for _, q := range ex.Questions {
 			qs = append(qs, provider.CardQuestion{ID: q.ID, Type: q.Type, Options: q.Options})
 		}
-		rec, e := a.cloud().RecognizeCard(ctx, raw, ex.Template, qs)
+		rec, e := client.RecognizeCard(ctx, raw, ex.Template, qs)
 		if e != nil {
 			return "", nil, e
 		}

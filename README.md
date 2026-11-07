@@ -8,6 +8,7 @@
 
 目前已落地的首版业务：
 - 单教师登录、班级/名单 CSV 导入、题目草稿与发布冻结。
+- 后台“模型与接口”管理OCR、OpenAI-compatible AI、答题卡网关；密钥加密/脱敏，保留或清除，版本冲突保护，保存后API/Worker热更新。
 - A4 单页个人码标准卡（最多40题），SVG浏览器打印。
 - 单选、多选、判断的确定性整数评分、复核历史、防重复和冲突不覆盖。
 - PDF 原卷上传、可配置 OCR + AI 解析，候选经显式确认可采纳为草稿，缺值不猜。
@@ -38,13 +39,13 @@ pnpm run dev
 
 Vite仅供localhost开发，/api代理到8080。访问http://localhost:5173。手机远程相机需HTTPS，不能把本机页面能打开当成手机取流已验证。
 
-生产不启DEV_MODE，必须设置DATABASE_URL、PUBLIC_ORIGIN、账号和强密码。API/Worker共享私有证据目录，首次先migrate再启动；生产有独立Worker，内存开发模式不能跨进程共享数据。
+生产不启DEV_MODE，必须设置DATABASE_URL、PUBLIC_ORIGIN、账号、强密码及稳定APP_ENCRYPTION_KEY（openssl rand -hex 32生成一次，单独备份）。OCR/AI/答题卡模型配置登录后在“模型与接口”修改，日常保存无需重启。API/Worker共享私有证据目录，首次先migrate再启动；生产有独立Worker，内存开发模式不能跨进程共享数据。
 
 ## 文档
 
 - [最新低资源约束](<docs/LOW_MEMORY_REVISION.md>)：覆盖原设计的默认路径。
 - [部署与GHCR](<docs/DEPLOYMENT.md>)：2C4G资源保险帽、域名、卷、备份与升级。
-- **[OCR / OpenAI 模型接入步骤](<docs/MODEL_SETUP.md>)**：配置位置、URL格式、重建容器、协议限制和所缺厂商适配。
+- **[OCR / OpenAI 模型接入步骤](<docs/MODEL_SETUP.md>)**：后台配置位置、保存热更新、加密主密钥、URL格式、协议限制和所缺厂商适配。
 - [云端接口契约](<docs/CLOUD_PROVIDERS.md>)：OCR、AI、答题卡识别配置及隐私/费用边界。
 - [实施API契约](<docs/IMPLEMENTATION_CONTRACT.md>)。
 - [验证记录与尚未验收范围](<docs/VALIDATION.md>)。

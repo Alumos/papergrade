@@ -3,6 +3,7 @@ x-app-env: &app-env
   SERVER_ADDR: ":8080"
   DATABASE_URL: "postgres://papergrade:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/papergrade?sslmode=disable"
   DATA_DIR: /app/data
+  APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Set a stable APP_ENCRYPTION_KEY (openssl rand -hex 32)}
   ADMIN_USERNAME: ${ADMIN_USERNAME:-teacher}
   ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
   DEV_MODE: "false"

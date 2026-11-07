@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -23,11 +24,12 @@ import (
 
 type Config struct {
 	Addr, DatabaseURL, DataDir, Username, Password, PublicOrigin string
+	EncryptionKey                                                string
 	Dev                                                          bool
 }
 
 func ConfigFromEnv() Config {
-	c := Config{Addr: os.Getenv("SERVER_ADDR"), DatabaseURL: os.Getenv("DATABASE_URL"), DataDir: os.Getenv("DATA_DIR"), Username: os.Getenv("ADMIN_USERNAME"), Password: os.Getenv("ADMIN_PASSWORD"), PublicOrigin: os.Getenv("PUBLIC_ORIGIN"), Dev: os.Getenv("DEV_MODE") == "true"}
+	c := Config{Addr: os.Getenv("SERVER_ADDR"), DatabaseURL: os.Getenv("DATABASE_URL"), DataDir: os.Getenv("DATA_DIR"), Username: os.Getenv("ADMIN_USERNAME"), Password: os.Getenv("ADMIN_PASSWORD"), PublicOrigin: os.Getenv("PUBLIC_ORIGIN"), Dev: os.Getenv("DEV_MODE") == "true", EncryptionKey: os.Getenv("APP_ENCRYPTION_KEY")}
 	if c.Addr == "" {
 		c.Addr = ":8080"
 	}
@@ -47,13 +49,15 @@ func bad(s string) error          { return &APIError{400, "VALIDATION_ERROR", s}
 func conflict(s string) error     { return &APIError{409, "CONFLICT", s} }
 
 type App struct {
-	Store     *store.Store
-	Config    Config
-	account   Account
-	loginMu   sync.Mutex
-	failures  map[string]attempt
-	heavy     chan struct{}
-	loginSlot chan struct{}
+	Store                *store.Store
+	Config               Config
+	account              Account
+	loginMu              sync.Mutex
+	failures             map[string]attempt
+	heavy                chan struct{}
+	loginSlot            chan struct{}
+	providerCipher       cipher.AEAD
+	ephemeralProviderKey bool
 }
 type attempt struct {
 	Count int
@@ -84,11 +88,15 @@ func New(ctx context.Context, c Config) (*App, error) {
 			return nil, fmt.Errorf("PUBLIC_ORIGIN must be an https origin in production")
 		}
 	}
+	providerCipher, ephemeral, e := setupEncryption(c.EncryptionKey, c.Dev, c.DatabaseURL == "")
+	if e != nil {
+		return nil, e
+	}
 	s, e := store.Open(ctx, c.DatabaseURL)
 	if e != nil {
 		return nil, e
 	}
-	a := &App{Store: s, Config: c, failures: map[string]attempt{}, heavy: make(chan struct{}, 1), loginSlot: make(chan struct{}, 1)}
+	a := &App{Store: s, Config: c, failures: map[string]attempt{}, heavy: make(chan struct{}, 1), loginSlot: make(chan struct{}, 1), providerCipher: providerCipher, ephemeralProviderKey: ephemeral}
 	if e = os.MkdirAll(c.DataDir, 0700); e != nil {
 		s.Close()
 		return nil, e
@@ -291,7 +299,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	delete(a.failures, host)
 	a.loginMu.Unlock()
 	a.cookie(w, token, 43200)
-	respond(w, 200, a.me())
+	respond(w, 200, a.me(r.Context()))
 }
 func (a *App) authorized(next http.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -313,12 +321,12 @@ func (a *App) authorized(next http.Handler) http.HandlerFunc {
 		next.ServeHTTP(w, r)
 	}
 }
-func (a *App) me() map[string]any {
-	return map[string]any{"user": map[string]string{"id": "teacher", "username": a.account.Username}, "storage_mode": a.Store.Mode(), "capabilities": a.capabilities()}
+func (a *App) me(ctx context.Context) map[string]any {
+	return map[string]any{"user": map[string]string{"id": "teacher", "username": a.account.Username}, "storage_mode": a.Store.Mode(), "capabilities": a.capabilities(ctx)}
 }
 func (a *App) routes() http.Handler {
 	m := http.NewServeMux()
-	m.HandleFunc("GET /api/v1/me", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, a.me()) })
+	m.HandleFunc("GET /api/v1/me", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, a.me(r.Context())) })
 	m.HandleFunc("POST /api/v1/auth/logout", func(w http.ResponseWriter, r *http.Request) {
 		e := a.Store.With(r.Context(), func(t *store.Tx) error { return t.Delete("session", digest(a.sessionToken(r))) })
 		if e != nil {
@@ -328,7 +336,8 @@ func (a *App) routes() http.Handler {
 		a.cookie(w, "", -1)
 		respond(w, 200, map[string]bool{"ok": true})
 	})
-	m.HandleFunc("GET /api/v1/settings/capabilities", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, a.capabilities()) })
+	m.HandleFunc("GET /api/v1/settings/capabilities", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, a.capabilities(r.Context())) })
+	a.registerProviders(m)
 	a.registerClasses(m)
 	a.registerExams(m)
 	a.registerCaptures(m)

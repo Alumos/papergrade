@@ -60,6 +60,8 @@ jobs:
       - run: node scripts/check-config.mjs
   docker-check:
     runs-on: ubuntu-latest
+    env:
+      APP_ENCRYPTION_KEY: ci-only-disposable-settings-key-not-for-production
     needs: [go, web]
     steps:
       - uses: actions/checkout@v4

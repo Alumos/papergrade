@@ -20,7 +20,9 @@ Linux VPS + Docker Engine + Compose v2、绑定域名、80/443可达、足够SSD
 
 ~~~sh
 cp .env.example .env
-# 编辑DOMAIN、密码、云端端点。数据库密码建议用openssl rand -hex 24生成，避免URL保留字符。
+# 编辑DOMAIN、账号/数据库密码及APP_ENCRYPTION_KEY；模型在登录后的后台配置。
+# APP_ENCRYPTION_KEY用openssl rand -hex 32生成一次，保持稳定并单独备份。
+# 数据库密码建议用openssl rand -hex 24生成，避免URL保留字符。
 # 本地构建仅适合开发/测试，VPS生产推荐拉GitHub Actions镜像。
 docker compose build
 # 必须先迁移，api/worker启动不会自动修改数据库结构。
@@ -30,11 +32,13 @@ docker compose ps
 docker compose logs --tail=100 api worker
 ~~~
 
-生产不启DEV_MODE、不将API8080和PG5432映射公网。数据卷保存证据、PG、Caddy证书；禁止down -v。首启应用UID10001对卷写权限必须检查；新命名卷镜像内目录权限应拷贝，现有错误权限需人工修复，不能用chmod777当常态。
+生产不启DEV_MODE，必须配置稳定的 APP_ENCRYPTION_KEY（至少32字节；API和Worker相同）；升级/恢复时保留，不可任意重新生成。模型接口和密钥在后台“模型与接口”设置，无需重启。
+
+不将API8080和PG5432映射公网。数据卷保存证据、PG、Caddy证书；禁止down -v。首启应用UID10001对卷写权限必须检查；新命名卷镜像内目录权限应拷贝，现有错误权限需人工修复，不能用chmod777当常态。
 
 ## GitHub Actions与GHCR
 
-把papergrade目录本身作为仓库根上传。ci.yml执行Go与真实PG测试/前端测试构建/Compose解析/镜像构建/一次性容器启动检查；images.yml由v*标签或手动触发，先执行真实PG与前端测试，再为linux/amd64和linux/arm64构建app与gateway镜像，发布到GHCR。仅配置文件已创建，尚未推送或运行远程Action。
+把papergrade目录本身作为仓库根上传。ci.yml执行Go与真实PG测试/前端测试构建/Compose解析/镜像构建/一次性容器启动检查；images.yml由v*标签或手动触发，先执行真实PG与前端测试，再为linux/amd64和linux/arm64构建app与gateway镜像，发布到GHCR。此前main提交已通过真实GitHub Actions的Go/前端/Docker构建与容器启动；新增设置功能须以对应新提交的Actions结果为准。镜像发布仍需v*标签或手动触发，不等于CI检查成功就已发布。
 
 默认使用GITHUB_TOKEN发布，需要仓库Actions具备packages:write。GHCR包的可见性按账号/组织策略设置；私有镜像VPS需用read:packages权限凭据docker login，不能把token写进Compose。
 

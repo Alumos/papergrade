@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BookOpen, LogOut, Plus } from "lucide-react";
+import { BookOpen, LogOut, Plus, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -13,6 +13,7 @@ import ClassesPage from "@/features/classes/ClassesPage";
 import ExamsPage from "@/features/exams/ExamsPage";
 import ExamForm from "@/features/exams/ExamForm";
 import ExamWorkspace from "@/features/exams/ExamWorkspace";
+import ProvidersPage from "@/features/settings/ProvidersPage";
 type Capabilities = {
   storage_mode: string;
   recognition_mode: string;
@@ -120,6 +121,10 @@ export default function App() {
               <TabsTrigger className="min-h-11" value="classes">
                 班级与名册
               </TabsTrigger>
+              <TabsTrigger className="min-h-11" value="settings">
+                <Settings className="mr-1 size-4" />
+                设置
+              </TabsTrigger>
             </TabsList>
           </Tabs>
           <Button
@@ -135,12 +140,14 @@ export default function App() {
             新建考试
           </Button>
         </div>
-        <CapabilitiesBanner mode={session.storage_mode} />
+        <CapabilitiesBanner key={epoch} mode={session.storage_mode} />
         <Separator />
         {error && <Feedback error>{error}</Feedback>}
         <main>
           {page === "classes" ? (
             <ClassesPage />
+          ) : page === "settings" ? (
+            <ProvidersPage onSaved={() => setEpoch((v) => v + 1)} />
           ) : create ? (
             <div className="space-y-6">
               <Button

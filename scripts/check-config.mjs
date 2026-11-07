@@ -8,7 +8,8 @@ assert(!docker.includes('poppler')&&!docker.includes('tesseract'), 'no local OCR
 assert(compose.includes('read_only: true'), 'application root must be read-only');
 assert(!compose.includes('5432:5432'), 'do not publish database');
 assert(compose.includes('PUBLIC_ORIGIN:'), 'production exact Origin required');
-assert(env.includes('CARD_ENDPOINT='), 'cloud card gateway config required');
+assert(compose.includes('APP_ENCRYPTION_KEY:'), 'encrypted settings require a master key');
+assert(env.includes('CARD_ENDPOINT='), 'legacy cloud bootstrap remains documented');
 const pkg=JSON.parse(fs.readFileSync('web/package.json','utf8'));
 assert(pkg.packageManager.startsWith('pnpm@'), 'lock package manager version');
 console.log('Static cloud-first deployment guards passed (NOT a Docker runtime test).');

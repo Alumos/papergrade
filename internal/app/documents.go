@@ -97,7 +97,12 @@ func (a *App) registerDocuments(m *http.ServeMux) {
 				return
 			}
 		}
-		caps := a.cloud().Capabilities()
+		client, err := a.cloud(r.Context())
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		caps := client.Capabilities()
 		if !caps["ocr_configured"] || !caps["ai_configured"] {
 			fail(w, &APIError{503, "PROVIDER_NOT_CONFIGURED", "OCR and AI providers are required; no parsing result fabricated"})
 			return
@@ -181,11 +186,19 @@ func (a *App) processDocument(ctx context.Context, id string, job *store.Job) er
 	raw, e := a.load(d.StoragePath, 20<<20)
 	var artifact any
 	if e == nil {
-		extraction, er := a.cloud().Extract(ctx, d.Filename, raw)
+		client, er := a.cloud(ctx)
+		if er != nil {
+			return er
+		}
+		extraction, er := client.Extract(ctx, d.Filename, raw)
 		e = er
 		raw = nil
 		if e == nil {
-			analysis, er := a.cloud().Analyze(ctx, extraction.Text)
+			client, er := a.cloud(ctx)
+			if er != nil {
+				return er
+			}
+			analysis, er := client.Analyze(ctx, extraction.Text)
 			e = er
 			if e == nil {
 				artifact = map[string]any{"extraction": extraction, "analysis": analysis, "requires_teacher_confirmation": true}
