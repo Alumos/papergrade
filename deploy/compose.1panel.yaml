@@ -1,0 +1,154 @@
+# Papergrade 阅卷系统 · 1Panel 编排
+# 粘贴到 1Panel「容器 -> 编排 -> 创建编排」。
+# 需要改的只有 5 处，都在下面标了 CHANGE_ME：
+#   1) 数据库密码（两处，必须一致）  2) 加密主密钥  3) 管理员密码  4) 访问域名
+# 生成随机值：openssl rand -hex 32
+name: papergrade
+
+x-app-env: &app-env
+  SERVER_ADDR: ":8080"
+  DATABASE_URL: "postgres://papergrade:CHANGE_ME_DB_PASSWORD@postgres:5432/papergrade?sslmode=disable"
+  DATA_DIR: /app/data
+  APP_ENCRYPTION_KEY: "CHANGE_ME_ENCRYPTION_KEY"
+  ADMIN_USERNAME: "teacher"
+  ADMIN_PASSWORD: "CHANGE_ME_ADMIN_PASSWORD"
+  DEV_MODE: "false"
+  # 浏览器实际访问的 https 地址，结尾不要带斜杠
+  PUBLIC_ORIGIN: "https://exam.example.com"
+  GOMAXPROCS: "1"
+
+x-log: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:17.6-bookworm
+    container_name: papergrade-postgres
+    environment:
+      POSTGRES_USER: papergrade
+      POSTGRES_DB: papergrade
+      POSTGRES_PASSWORD: "CHANGE_ME_DB_PASSWORD"
+    command:
+      - postgres
+      - -c
+      - shared_buffers=32MB
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=32MB
+      - -c
+      - max_connections=12
+      - -c
+      - max_parallel_workers_per_gather=0
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    shm_size: 128m
+    mem_limit: 256m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U papergrade -d papergrade"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+    networks: [database]
+
+  # 一次性建表；成功退出后 api/worker 才会启动
+  migrate:
+    image: ghcr.io/alumos/papergrade:0.2.1
+    container_name: papergrade-migrate
+    command: ["migrate"]
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    logging: *logging
+    networks: [database]
+
+  api:
+    image: ghcr.io/alumos/papergrade:0.2.1
+    container_name: papergrade-api
+    command: ["api"]
+    environment:
+      <<: *app-env
+      GOMEMLIMIT: 96MiB
+    volumes:
+      - evidence:/app/data
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    mem_limit: 192m
+    pids_limit: 128
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    stop_grace_period: 25s
+    healthcheck:
+      test: ["CMD", "papergrade", "healthcheck"]
+      interval: 20s
+      timeout: 4s
+      start_period: 20s
+      retries: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    logging: *logging
+    networks: [database, edge]
+
+  worker:
+    image: ghcr.io/alumos/papergrade:0.2.1
+    container_name: papergrade-worker
+    command: ["worker"]
+    environment:
+      <<: *app-env
+      GOMEMLIMIT: 128MiB
+      DB_MAX_CONNS: "1"
+    volumes:
+      - evidence:/app/data
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    mem_limit: 256m
+    cpus: "0.50"
+    pids_limit: 128
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    logging: *logging
+    networks: [database, edge]
+
+  # 容器内 8090 纯 HTTP；HTTPS 由 1Panel 网站反向代理负责
+  gateway:
+    image: ghcr.io/alumos/papergrade:0.2.1-gateway
+    container_name: papergrade-gateway
+    environment:
+      # 只写端口不写域名 = Caddy 不申请证书，只监听 HTTP
+      DOMAIN: ":8090"
+    ports:
+      - "127.0.0.1:18080:8090"
+    mem_limit: 96m
+    restart: unless-stopped
+    depends_on: [api]
+    logging: *logging
+    networks: [edge]
+
+volumes:
+  pgdata:
+  evidence:
+
+networks:
+  database:
+    internal: true
+  edge:
