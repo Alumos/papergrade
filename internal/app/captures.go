@@ -209,7 +209,8 @@ type recognizedCard struct {
 // student-number card. Both the legacy a5-v2 and the English a5-v3 are built-in
 // OMR cards and must never fall back to a paid cloud card provider.
 func isStudentCard(ex Exam) bool {
-	return ex.Template != nil && (ex.Template.Version == vision.StudentVersion || ex.Template.Version == vision.EnglishVersion)
+	return ex.Template != nil && (ex.Template.Version == vision.StudentVersion ||
+		ex.Template.Version == vision.EnglishVersion || ex.Template.Version == vision.EnglishV4Version)
 }
 func (a *App) recognize(ctx context.Context, raw []byte, ex Exam) (recognizedCard, error) {
 	out := recognizedCard{IdentityState: "not_required", Answers: []grading.Answer{}}

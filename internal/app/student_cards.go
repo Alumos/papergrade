@@ -14,8 +14,8 @@ func (a *App) printSheet(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
-	if ex.Template == nil || (ex.Template.Version != vision.StudentVersion && ex.Template.Version != vision.EnglishVersion) {
-		fail(w, conflict("two-up printing requires an a5-v2/a5-v3 published release; legacy cards remain single-sheet"))
+	if ex.Template == nil || (ex.Template.Version != vision.StudentVersion && ex.Template.Version != vision.EnglishVersion && ex.Template.Version != vision.EnglishV4Version) {
+		fail(w, conflict("two-up printing requires a half-A4 student card release; legacy a4-v1 cards remain single-sheet"))
 		return
 	}
 	ids := strings.Split(r.URL.Query().Get("student_ids"), ",")

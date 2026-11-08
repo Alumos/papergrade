@@ -37,16 +37,9 @@ type EnglishQuestion struct {
 // that cannot be printed at the validated physical size is rejected instead of
 // being shrunk into an unfillable card.
 func BuildEnglishManifest(questions []EnglishQuestion) (Manifest, error) {
-	if len(questions) < 1 || len(questions) > englishQuestions {
-		return Manifest{}, fmt.Errorf("%w: english card supports 1..%d questions", ErrInvalidManifest, englishQuestions)
-	}
-	base := make([]Question, len(questions))
-	for i, q := range questions {
-		if len(q.Options) < 2 || len(q.Options) > englishOptions {
-			return Manifest{}, fmt.Errorf("%w: english options require 2..%d", ErrInvalidManifest, englishOptions)
-		}
-		base[i] = q.Question
-		base[i].Section = q.Section
+	base, err := englishBase(questions)
+	if err != nil {
+		return Manifest{}, err
 	}
 	m, err := buildManifestCore(base, englishQuestions, englishOptions)
 	if err != nil {
@@ -90,6 +83,24 @@ func BuildEnglishManifest(questions []EnglishQuestion) (Manifest, error) {
 		}
 	}
 	return m, nil
+}
+
+// englishBase validates the shared English-card rules and returns the questions
+// as printed. Every English layout must go through this, so no version can
+// silently accept more questions or options than the paper allows.
+func englishBase(questions []EnglishQuestion) ([]Question, error) {
+	if len(questions) < 1 || len(questions) > englishQuestions {
+		return nil, fmt.Errorf("%w: english card supports 1..%d questions", ErrInvalidManifest, englishQuestions)
+	}
+	base := make([]Question, len(questions))
+	for i, q := range questions {
+		if len(q.Options) < 2 || len(q.Options) > englishOptions {
+			return nil, fmt.Errorf("%w: english options require 2..%d", ErrInvalidManifest, englishOptions)
+		}
+		base[i] = q.Question
+		base[i].Section = q.Section
+	}
+	return base, nil
 }
 
 // englishStarts returns the first option-row centre for each band. Bands are

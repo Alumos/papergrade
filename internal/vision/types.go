@@ -64,6 +64,11 @@ type PrintCard struct {
 // MarkerSize are fractions of page WIDTH, so a physical circle remains round.
 // Markers are centers in clockwise order: TL, TR, BR, BL.
 type Manifest struct {
+	// BubbleW/BubbleH describe the printed fill cell when it is a rectangle.
+	// They are normalized by page width and height respectively. Zero means the
+	// legacy circular/square cell described by Bubble.R.
+	BubbleW             float64       `json:"bubble_w,omitempty"`
+	BubbleH             float64       `json:"bubble_h,omitempty"`
 	StudentNumberDigits int           `json:"student_number_digits,omitempty"`
 	StudentBubbles      []DigitBubble `json:"student_bubbles,omitempty"`
 	Version             string        `json:"version"`

@@ -76,11 +76,11 @@ try{
  push(20,["A","B","C","D"],"第四部分 英语知识运用（41–60）");
  let eexam=await request("/api/v1/exams","POST",{title:"英语期中答题卡",subject:"英语",class_id:ecls.id,questions:eqs});
  eexam=await request("/api/v1/exams/"+eexam.id+"/publish","POST",{revision:eexam.revision});
- assert.equal(eexam.template.version,"a5-v3");assert.equal(eexam.template.student_number_digits,4);assert.equal(eexam.template.questions.length,60);
+ assert.equal(eexam.template.version,"a5-v4");assert.equal(eexam.template.student_number_digits,4);assert.equal(eexam.template.questions.length,60);assert(eexam.template.bubble_w>0&&eexam.template.bubble_w<eexam.template.bubble_h*0+1);
  assert(eexam.template.questions.some(q=>q.options.length===7));assert(eexam.template.questions[0].section);
  const esheets=await request("/api/v1/exams/"+eexam.id+"/sheets");
  const esvg=await request("/api/v1/exams/"+eexam.id+"/print-sheet?student_ids="+esheets.items[0].student_id);
- assert(esvg.includes("a5-v3"));assert(esvg.includes("七选五"));
+ assert(esvg.includes("a5-v4"));assert(esvg.includes("七选五"));
  await fs.writeFile(path.join(output,"english-two-up.svg"),esvg);
  await fs.writeFile(path.join(output,"english-manifest.json"),JSON.stringify(eexam.template));
  const eout=path.join(output,"english-card.png");
@@ -94,5 +94,5 @@ try{
  assert.equal(ecommit.student_number,"1932",JSON.stringify(ecommit));
  assert.equal(ecommit.score_units,ecommit.max_score_units,JSON.stringify(ecommit));
  await fs.writeFile(path.join(output,"integration.json"),JSON.stringify({exam_id:exam.id,release_id:exam.release_id,document_id:document.id,english_exam_id:eexam.id,english_capture_id:ecommit.capture_id,source:process.env.REAL_OLLAMA_URL?"real NAS Ollama; AI fixture":"Ollama+AI protocol fixtures",received:2,english_received:1,ocr_calls:ocrCalls,ai_calls:aiCalls},null,2));
- console.log('PASS v0.2: encrypted live Ollama settings -> persisted OCR -> OpenAI analysis -> explicit adoption/missing answer block -> teacher key -> a5-v2 -> shared exam QR A4 two-up -> actual student-number Go OMR0001+0002 -> idempotent scores -> regrade -> restart persistence -> English a5-v3 60-question ABC/ABCD/A-G two-up -> real-pixel Go OMR 1932 full marks. AI uses an HTTP fixture, not a real paid provider.');
+ console.log('PASS v0.2: encrypted live Ollama settings -> persisted OCR -> OpenAI analysis -> explicit adoption/missing answer block -> teacher key -> a5-v2 -> shared exam QR A4 two-up -> actual student-number Go OMR0001+0002 -> idempotent scores -> regrade -> restart persistence -> English a5-v4 60-question ABC/ABCD/A-G horizontal-row card -> real-pixel Go OMR 1932 full marks. AI uses an HTTP fixture, not a real paid provider.');
 }finally{for(const p of children)if(p.exitCode===null){p.kill('SIGTERM');await Promise.race([new Promise(r=>p.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);if(p.exitCode===null)p.kill('SIGKILL')}await new Promise(r=>fixture.close(r));execFileSync(sandboxBinary,['-drop',schema],{stdio:'pipe'});}

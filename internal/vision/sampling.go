@@ -99,3 +99,55 @@ func bubbleFill(g *image.Gray, h homography, b Bubble, black, white float64, rat
 	}
 	return sum / n, dark / n
 }
+
+// cellFillRing samples the outer ring of a rectangular fill cell. The printed
+// letter sits in the centre, so a blank cell reads as blank while a filled cell
+// still covers the ring.
+func cellFillRing(g *image.Gray, h homography, b Bubble, halfW, halfH, black, white float64) (float64, float64) {
+	sum, dark, n := 0., 0., 0.
+	for y := -8; y <= 8; y++ {
+		for x := -8; x <= 8; x++ {
+			rr := math.Hypot(float64(x), float64(y))
+			if rr < .62*8 || rr > .90*8 {
+				continue
+			}
+			p := Point{b.X + float64(x)/8*halfW, b.Y + float64(y)/8*halfH}
+			v := sample(g, project(h, p))
+			d := math.Max(0, math.Min(1, (white-v)/(white-black)))
+			sum += d
+			if d > .45 {
+				dark++
+			}
+			n++
+		}
+	}
+	if n == 0 {
+		return 0, 0
+	}
+	return sum / float64(n), dark / float64(n)
+}
+
+// cellSupport walks the printed border of a rectangular fill cell.
+func cellSupport(g *image.Gray, h homography, b Bubble, halfW, halfH, black, white float64) float64 {
+	sum := 0.
+	for i := 0; i < 24; i++ {
+		angle := float64(i) * 2 * math.Pi / 24
+		c, s := math.Cos(angle), math.Sin(angle)
+		// Scale the direction until it reaches the rectangle border.
+		scale := 1.
+		if v := math.Abs(c) / halfW; v > scale {
+			scale = v
+		}
+		if v := math.Abs(s) / halfH; v > scale {
+			scale = v
+		}
+		darkest := 0.
+		for _, f := range []float64{.94, 1, 1.06} {
+			p := Point{b.X + c/scale*f, b.Y + s/scale*f}
+			d := math.Max(0, math.Min(1, (white-sample(g, project(h, p)))/(white-black)))
+			darkest = math.Max(darkest, d)
+		}
+		sum += darkest
+	}
+	return sum / 24
+}

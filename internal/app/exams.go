@@ -222,7 +222,7 @@ func (a *App) registerExams(m *http.ServeMux) {
 				for i, q := range qs {
 					eq[i] = vision.EnglishQuestion{Question: q}
 				}
-				manifest, manifestErr = vision.BuildEnglishManifest(eq)
+				manifest, manifestErr = vision.BuildEnglishManifestV4(eq)
 			} else {
 				manifest, manifestErr = vision.BuildStudentManifest(qs, digits)
 			}

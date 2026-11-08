@@ -280,7 +280,7 @@ export function useScanController(exam: Exam) {
         const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
         ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
         const v2 =
-          manifest?.version === "a5-v2" || manifest?.version === "a5-v3";
+          !!manifest && ["a5-v2", "a5-v3", "a5-v4"].includes(manifest.version);
         const frame = analyzeFrame(
           ctx.getImageData(0, 0, canvas.width, canvas.height),
           !v2,
@@ -420,7 +420,7 @@ export function useScanController(exam: Exam) {
     preview,
     manifest,
     async inspectUpload(blob: Blob) {
-      if (manifest?.version !== "a5-v2" && manifest?.version !== "a5-v3")
+      if (!manifest || !["a5-v2", "a5-v3", "a5-v4"].includes(manifest.version))
         return undefined;
       const bitmap = await createImageBitmap(blob);
       const canvas = document.createElement("canvas");

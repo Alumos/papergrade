@@ -32,8 +32,9 @@ export default function PrintPanel({ exam }: { exam: Exam }) {
   // Both fixed half-A4 cards print two-up and require cutting before scanning.
   // The English card (a5-v3) uses the same rule, so never test for one version.
   const twoUp =
-    manifest.data?.version === "a5-v2" || manifest.data?.version === "a5-v3";
-  const english = manifest.data?.version === "a5-v3";
+    !!manifest.data && ["a5-v2", "a5-v3", "a5-v4"].includes(manifest.data.version);
+  const english =
+    manifest.data?.version === "a5-v3" || manifest.data?.version === "a5-v4";
   const digits =
     exam.student_number_digits ?? manifest.data?.student_number_digits ?? "";
   const [selected, setSelected] = useState<string[]>([]),

@@ -36,6 +36,9 @@ func RenderSVG(m Manifest, title, studentLabel, token string) ([]byte, error) {
 	if m.Version == StudentVersion {
 		return renderStudentSVG(m, title, studentLabel, token)
 	}
+	if m.Version == EnglishV4Version {
+		return renderEnglishV4SVG(m, title, studentLabel, token)
+	}
 	if m.Version == EnglishVersion {
 		return renderEnglishSVG(m, title, studentLabel, token)
 	}
@@ -155,9 +158,32 @@ func raster(m Manifest, qr [][]bool, width int) *image.Gray {
 	for _, d := range m.StudentBubbles {
 		allBubbles = append(allBubbles, Bubble{X: d.X, Y: d.Y, R: d.R})
 	}
-	english := m.Version == EnglishVersion
+	english := m.Version == EnglishVersion || m.Version == EnglishV4Version
+	rectangle := m.BubbleW > 0 && m.BubbleH > 0
+	halfW, halfH := m.BubbleW/2*float64(width), m.BubbleH/2*float64(height)
 	for _, b := range allBubbles {
 		cx, cy, r := b.X*float64(width), b.Y*float64(height), b.R*float64(width)
+		if rectangle {
+			// Wide rectangular fill cell with the letter printed in the centre.
+			for y := int(cy - halfH - 1); y <= int(cy+halfH+1); y++ {
+				for x := int(cx - halfW - 1); x <= int(cx+halfW+1); x++ {
+					dx, dy := math.Abs(float64(x)-cx), math.Abs(float64(y)-cy)
+					onEdge := math.Abs(dx-halfW) < .8 && dy <= halfH+1 || math.Abs(dy-halfH) < .8 && dx <= halfW+1
+					if onEdge {
+						im.SetGray(x, y, color.Gray{0})
+					}
+				}
+			}
+			// Match the printed letter size (about 0.44 of the cell height), so this
+			// diagnostic image cannot be easier to read than the real card.
+			glyphW, glyphH := halfW*.30, halfH*.45
+			for y := int(cy - glyphH); y <= int(cy+glyphH); y++ {
+				for x := int(cx - glyphW); x <= int(cx+glyphW); x++ {
+					im.SetGray(x, y, color.Gray{0})
+				}
+			}
+			continue
+		}
 		if english {
 			// English cards print a square fill cell with the option letter inside.
 			// The raster mirrors that: an outlined square plus a small centre mark

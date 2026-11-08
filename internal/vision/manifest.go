@@ -59,6 +59,12 @@ func validateManifest(m Manifest) error {
 	canonical, err := BuildManifest(m.Questions)
 	if m.Version == StudentVersion {
 		canonical, err = BuildStudentManifest(m.Questions, m.StudentNumberDigits)
+	} else if m.Version == EnglishV4Version {
+		qs := make([]EnglishQuestion, len(m.Questions))
+		for i, q := range m.Questions {
+			qs[i] = EnglishQuestion{Question: q}
+		}
+		canonical, err = BuildEnglishManifestV4(qs)
 	} else if m.Version == EnglishVersion {
 		qs := make([]EnglishQuestion, len(m.Questions))
 		for i, q := range m.Questions {

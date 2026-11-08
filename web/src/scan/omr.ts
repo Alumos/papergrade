@@ -174,8 +174,8 @@ export function recognizeOMR(
   manifest: Manifest,
   providedCorners?: Point[],
 ): OMRPreview {
-  if (manifest.version !== "a5-v2" && manifest.version !== "a5-v3")
-    throw new Error("此浏览器OMR仅支持a5-v2/a5-v3，旧卡仍由服务端识别");
+  if (!["a5-v2", "a5-v3", "a5-v4"].includes(manifest.version))
+    throw new Error("此浏览器OMR仅支持半A4学号卡（a5-v2/v3/v4），旧卡仍由服务端识别");
   if (
     !manifest.black_reference ||
     !manifest.white_reference ||

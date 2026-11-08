@@ -36,9 +36,22 @@ func main() {
 	must(err)
 	img := image.NewRGBA(decoded.Bounds())
 	draw.Draw(img, img.Bounds(), decoded, image.Point{}, draw.Src)
+	// Fill exactly the printed cell shape: a wide rectangle on a5-v4 cards, a
+	// circle on the older cards. Filling a circle on a rectangle would leave the
+	// sampled ring only partly covered and would not represent a real student.
 	fill := func(x, y, r float64) {
-		cx, cy := x*float64(img.Bounds().Dx()), y*float64(img.Bounds().Dy())
-		radius := r * float64(img.Bounds().Dx()) * .88
+		width, height := float64(img.Bounds().Dx()), float64(img.Bounds().Dy())
+		cx, cy := x*width, y*height
+		if m.BubbleW > 0 && m.BubbleH > 0 {
+			halfW, halfH := m.BubbleW/2*width*.92, m.BubbleH/2*height*.92
+			for yy := int(cy-halfH) - 1; yy <= int(cy+halfH)+1; yy++ {
+				for xx := int(cx-halfW) - 1; xx <= int(cx+halfW)+1; xx++ {
+					img.Set(xx, yy, color.Black)
+				}
+			}
+			return
+		}
+		radius := r * width * .88
 		for yy := int(cy-radius) - 1; yy <= int(cy+radius)+1; yy++ {
 			for xx := int(cx-radius) - 1; xx <= int(cx+radius)+1; xx++ {
 				dx, dy := float64(xx)-cx, float64(yy)-cy

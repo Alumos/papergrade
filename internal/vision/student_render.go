@@ -26,14 +26,16 @@ func RenderTwoUpSVG(m Manifest, title string, cards []PrintCard) ([]byte, error)
 	if err := validateManifest(m); err != nil {
 		return nil, err
 	}
-	if (m.Version != StudentVersion && m.Version != EnglishVersion) || len(cards) < 1 || len(cards) > 2 {
+	if (m.Version != StudentVersion && m.Version != EnglishVersion && m.Version != EnglishV4Version) || len(cards) < 1 || len(cards) > 2 {
 		return nil, fmt.Errorf("vision: two-up requires a5-v2/a5-v3 and 1..2 cards")
 	}
 	var out bytes.Buffer
 	fmt.Fprint(&out, `<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 210 297"><rect width="210" height="297" fill="white"/>`)
 	for i, c := range cards {
 		var err error
-		if m.Version == EnglishVersion {
+		if m.Version == EnglishV4Version {
+			err = englishV4Group(&out, m, title, c.StudentLabel, c.Token, float64(i)*148.5)
+		} else if m.Version == EnglishVersion {
 			err = englishGroup(&out, m, title, c.StudentLabel, c.Token, float64(i)*148.5)
 		} else {
 			err = studentGroup(&out, m, title, c.StudentLabel, c.Token, float64(i)*148.5)

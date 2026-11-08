@@ -54,8 +54,11 @@ func TestEnglishPublishUsesFixedFourDigitCard(t *testing.T) {
 	h := setup(t)
 	h.login()
 	ex := h.englishExam("1932")
-	if ex.Template == nil || ex.Template.Version != "a5-v3" {
-		t.Fatalf("expected a5-v3 English card, got %+v", ex.Template)
+	if ex.Template == nil || ex.Template.Version != "a5-v4" {
+		t.Fatalf("expected a5-v4 English card, got %+v", ex.Template)
+	}
+	if ex.Template.BubbleW <= 0 || ex.Template.BubbleW >= ex.Template.BubbleH {
+		t.Fatalf("English cells must be wide rectangles: %+v", ex.Template)
 	}
 	if ex.StudentNumberDigits != 4 || ex.Template.StudentNumberDigits != 4 {
 		t.Fatalf("English card must freeze four digits: %d/%d", ex.StudentNumberDigits, ex.Template.StudentNumberDigits)
@@ -88,7 +91,7 @@ func TestEnglishPublishUsesFixedFourDigitCard(t *testing.T) {
 		h.t.Fatal("published English sheet not listed")
 	}
 	svg := h.request("GET", "/api/v1/exams/"+ex.ID+"/print-sheet?student_ids="+sheet.StudentID, nil, 200).Body.String()
-	if !strings.Contains(svg, "a5-v3") || !strings.Contains(svg, "第一部分") || !strings.Contains(svg, "七选五") {
+	if !strings.Contains(svg, "a5-v4") || !strings.Contains(svg, "第一部分") || !strings.Contains(svg, "七选五") {
 		t.Fatal("printed sheet is missing the English card or its group headings")
 	}
 }
@@ -103,19 +106,33 @@ func TestEnglishPublishRequiresFourDigitRoster(t *testing.T) {
 	h.request("POST", "/api/v1/exams/"+ex.ID+"/publish", map[string]int{"revision": ex.Revision}, 400)
 }
 
-func TestEnglishPublishRejectsOverCapacityCard(t *testing.T) {
+// A paper where every question has seven options used to be rejected. The
+// horizontal a5-v4 layout fits it, so this now publishes; a paper beyond the
+// supported question count is still refused instead of being shrunk.
+func TestEnglishSevenOptionPaperFitsButTooManyQuestionsDoNot(t *testing.T) {
 	h := setup(t)
 	h.login()
-	cls := parse[Class](h.t, h.request("POST", "/api/v1/classes", map[string]string{"name": "英语超量班"}, 201))
+	cls := parse[Class](h.t, h.request("POST", "/api/v1/classes", map[string]string{"name": "英语七选五班"}, 201))
 	h.request("POST", "/api/v1/classes/"+cls.ID+"/students", map[string]any{"students": []map[string]string{{"number": "1932", "name": "学生"}}}, 201)
-	questions := []grading.Question{}
-	for i := 0; i < 60; i++ {
-		questions = append(questions, grading.Question{
-			Number: itoa(i + 1), Type: "single_choice",
-			Options: []string{"A", "B", "C", "D", "E", "F", "G"}, Answer: []string{"A"},
-			ScoreUnits: 200, Section: "七选五",
-		})
+	makeQuestions := func(n int) []grading.Question {
+		out := []grading.Question{}
+		for i := 0; i < n; i++ {
+			out = append(out, grading.Question{
+				Number: itoa(i + 1), Type: "single_choice",
+				Options: []string{"A", "B", "C", "D", "E", "F", "G"}, Answer: []string{"A"},
+				ScoreUnits: 200, Section: "七选五",
+			})
+		}
+		return out
 	}
-	ex := parse[Exam](h.t, h.request("POST", "/api/v1/exams", examInput{Title: "英语超量", Subject: "英语", ClassID: cls.ID, Questions: questions}, 201))
-	h.request("POST", "/api/v1/exams/"+ex.ID+"/publish", map[string]int{"revision": ex.Revision}, 400)
+	ex := parse[Exam](h.t, h.request("POST", "/api/v1/exams", examInput{Title: "英语七选五", Subject: "英语", ClassID: cls.ID, Questions: makeQuestions(60)}, 201))
+	published := parse[Exam](h.t, h.request("POST", "/api/v1/exams/"+ex.ID+"/publish", map[string]int{"revision": ex.Revision}, 200))
+	if published.Template == nil || published.Template.Version != "a5-v4" {
+		t.Fatalf("seven-option paper should publish on a5-v4: %+v", published.Template)
+	}
+	if len(published.Template.Bubbles) != 60*7 {
+		t.Fatalf("expected 420 cells, got %d", len(published.Template.Bubbles))
+	}
+	// More than 60 questions is refused at the API boundary, before a card is built.
+	h.request("POST", "/api/v1/exams", examInput{Title: "英语超量", Subject: "英语", ClassID: cls.ID, Questions: makeQuestions(61)}, 400)
 }

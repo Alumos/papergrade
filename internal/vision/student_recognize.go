@@ -52,21 +52,38 @@ func recognizeStudent(g *image.Gray, m Manifest, corners []Point) (Recognition, 
 		if math.Hypot(center.X-edge.X, center.Y-edge.Y) < 4.5 {
 			return r, ErrQuality
 		}
+		if m.BubbleW > 0 && m.BubbleH > 0 {
+			// A rectangular cell is only as tall as BubbleH; check that axis too so a
+			// small, distant photo cannot produce confidently blank cells.
+			bottom := project(transform, Point{b.X, b.Y + m.BubbleH/2})
+			if math.Hypot(center.X-bottom.X, center.Y-bottom.Y) < 3.0 {
+				return r, ErrQuality
+			}
+		}
 	}
 	black, _ := boxMean(g, transform, m.BlackReference)
 	white, _ := boxMean(g, transform, m.WhiteReference)
 	// English cards print the option letter inside the fill box, so their centre
 	// always carries template ink. Those cards sample the outer ring and verify
 	// the printed square border instead of the circular v2 bubble.
-	english := m.Version == EnglishVersion
+	english := m.Version == EnglishVersion || m.Version == EnglishV4Version
+	// a5-v4 prints wide rectangular cells; the manifest carries their size.
+	rectangle := m.BubbleW > 0 && m.BubbleH > 0
+	halfW, halfH := m.BubbleW/2, m.BubbleH/2
 	fill := func(b Bubble) (float64, float64) {
-		if english {
+		switch {
+		case rectangle:
+			return cellFillRing(g, transform, b, halfW, halfH, black, white)
+		case english:
 			return bubbleFillRing(g, transform, b, black, white, ratio)
 		}
 		return bubbleFill(g, transform, b, black, white, ratio)
 	}
 	outline := func(b Bubble) float64 {
-		if english {
+		switch {
+		case rectangle:
+			return cellSupport(g, transform, b, halfW, halfH, black, white)
+		case english:
 			return boxSupport(g, transform, b, black, white, ratio)
 		}
 		return ringSupport(g, transform, b, black, white, ratio)

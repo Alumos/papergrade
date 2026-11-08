@@ -38,7 +38,7 @@ func Recognize(img image.Image, m Manifest) (Recognition, error) {
 	g := grayImage(img)
 	// Both the fixed student-number cards are half-A4 single cards: reject a whole
 	// uncut two-up sheet instead of mixing the two halves.
-	studentCard := m.Version == StudentVersion || m.Version == EnglishVersion
+	studentCard := m.Version == StudentVersion || m.Version == EnglishVersion || m.Version == EnglishV4Version
 	corners, ok := findCardMarkers(g, studentCard)
 	if !ok {
 		return reject(ErrMarkers, "markers_not_found")
