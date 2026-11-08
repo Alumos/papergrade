@@ -38,6 +38,14 @@
 - 端到端脚本新增英语链路：发布 a5-v3 60题 → 生成双联SVG → 用实际像素填涂卡提交 → Go 独立识别学号 1932 与 60 题并计分满分。仍使用 HTTP fixture 作为 OCR/AI 协议替身（真实 NAS OCR 与真实模型另行单独验证）。
 - 仍未完成：真实手机拍摄、实体2B打印、不同纸张/光线条件下的大样本准确率。
 
+
+## 2026-11-08 SQLite 单文件改造与实测内存
+
+- 删除 PostgreSQL 整套：存储层改为纯 Go SQLite（modernc.org/sqlite，CGO 仍关闭），`go.mod` 移除 pgx。队列租约/fencing/死信语义保留，靠 SQLite 单写者保证原子性。
+- 启动自动建表（`CREATE TABLE IF NOT EXISTS`），不再需要 migrate 容器；部署从 4 个容器降到 3 个。
+- 验证：Go 全量测试通过；SQLite 存储专项 5 项通过（回滚、唯一冲突、租约过期清扫、重试上限、会话清理）；端到端脚本改为纯 SQLite 后全链路通过（OCR 入库 → AI 分析 → 采纳 → 发布 → A4 双联 → 真实像素 OMR → 重评分 → 重启后成绩保留 → 英语 60 题满分）。
+- 实测（macOS arm64，编译后二进制，SQLite 文件，GOMAXPROCS=1）：API 峰值 RSS **19.67 MiB**（启动 + 100 次 readiness），Worker 空闲峰值 **18.33 MiB**。不含网关、Docker 开销、真实 OCR/AI 调用与手机拍摄。
+- 这仍不是 2C4G 生产验收：需在目标 VPS 上记录空闲与扫描峰值。
 ## 一次有限的本机资源观测
 
 macOS 27.2 arm64，编译后的Go API、显式memory_dev、云端未配。执行启动 + HTTP名册/发布/SVG冒烟 + 100次readiness请求后正常退出，通过os.wait4统计：两次有限运行单进程峰值RSS约15.48–15.62 MiB，最近一次user CPU 0.147秒、sys CPU 0.013秒，约0.394秒。脚本scripts/measure-dev.py可复现（自动生成一次性随机测试凭据，不使用真实账号）。
