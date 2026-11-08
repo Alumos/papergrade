@@ -10,6 +10,7 @@ export function providerSaveError(error: unknown): string {
 export type ProviderKind = "ocr" | "ai" | "card";
 export type GatewaySettings = {
   url: string;
+  mode?: "omr" | "gateway";
   has_secret: boolean;
   configured: boolean;
 };
@@ -42,7 +43,12 @@ export type ProviderDraft = {
     secret: string;
     clear_secret: boolean;
   };
-  card: { url: string; secret: string; clear_secret: boolean };
+  card: {
+    mode: "omr" | "gateway";
+    url: string;
+    secret: string;
+    clear_secret: boolean;
+  };
 };
 export type ProviderTest = {
   provider: ProviderKind;
@@ -71,7 +77,13 @@ export function draftFromSettings(settings: ProviderSettings): ProviderDraft {
       secret: "",
       clear_secret: false,
     },
-    card: { url: settings.card.url, secret: "", clear_secret: false },
+    // Built-in OMR is the default: most deployments never configure a gateway.
+    card: {
+      mode: settings.card.mode ?? "omr",
+      url: settings.card.url,
+      secret: "",
+      clear_secret: false,
+    },
   };
 }
 function validateURL(label: string, value: string) {
@@ -94,6 +106,12 @@ function validateURL(label: string, value: string) {
 }
 export function providerPayload(revision: number, draft: ProviderDraft) {
   for (const kind of ["ocr", "ai", "card"] as const) {
+    // The built-in OMR path needs no gateway URL at all.
+    if (kind === "card" && draft.card.mode === "omr") {
+      if (draft.card.clear_secret && draft.card.secret)
+        throw new Error("不能同时填写并清除密钥");
+      continue;
+    }
     const value = kind === "ai" ? draft.ai.base_url : draft[kind].url;
     validateURL(providerNames[kind], value);
     if (draft[kind].clear_secret && draft[kind].secret)

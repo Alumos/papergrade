@@ -228,11 +228,38 @@ export default function ProvidersPage({ onSaved }: { onSaved: () => void }) {
                     ? "专用文档网关，负责 PDF / 图片文字提取。"
                     : kind === "ai"
                       ? "兼容 OpenAI 的分析接口；填写 API 根地址与真实可用模型名。"
-                      : "专用结构化答题卡网关，返回个人 token 与客观题选项；不是普通聊天模型。"}
+                      : "新版答题卡用内置 OMR，通常无需配置；只有旧版 a4-v1 个人二维码卡才需要外部网关。"}
                   状态来自已保存配置，不代表连通或识别准确。
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
+                {kind === "card" && (
+                  <div className="space-y-2">
+                    <Label>识别方式</Label>
+                    <Select
+                      value={draft.card.mode}
+                      onValueChange={(v) => change("card", "mode", v)}
+                      disabled={busy || !!testing}
+                    >
+                      <SelectTrigger className="min-h-11 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="omr">
+                          内置 OMR（推荐，无需配置）
+                        </SelectItem>
+                        <SelectItem value="gateway">
+                          外部答题卡网关（仅旧版 a4-v1）
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {draft.card.mode === "omr"
+                        ? "浏览器本地识别 + 服务端复核。新版答题卡 a5-v2 / a5-v4 都走这条路，下面留空直接保存即可。"
+                        : "只有识别旧版带个人二维码的 a4-v1 卡片时才需要外部网关。"}
+                    </p>
+                  </div>
+                )}
                 {kind === "ocr" && (
                   <>
                     <div className="space-y-2">
@@ -274,35 +301,39 @@ export default function ProvidersPage({ onSaved }: { onSaved: () => void }) {
                     )}
                   </>
                 )}
-                <div className="space-y-2">
-                  <Label htmlFor={"provider-url-" + kind}>
-                    {kind === "ai" ? "API Base URL" : "网关 URL"}
-                  </Label>
-                  <Input
-                    className="min-h-11"
-                    id={"provider-url-" + kind}
-                    type="url"
-                    autoComplete="off"
-                    value={kind === "ai" ? draft.ai.base_url : draft[kind].url}
-                    placeholder={
-                      kind === "ai"
-                        ? "https://api.example.com/v1"
-                        : "https://gateway.example.com/endpoint"
-                    }
-                    disabled={busy || !!testing}
-                    onChange={(e) =>
-                      change(
-                        kind,
-                        kind === "ai" ? "base_url" : "url",
-                        e.target.value,
-                      )
-                    }
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    留空并保存可禁用此服务。URL
-                    不得包含内嵌密码，请使用独立密钥字段。
-                  </p>
-                </div>
+                {!(kind === "card" && draft.card.mode === "omr") && (
+                  <div className="space-y-2">
+                    <Label htmlFor={"provider-url-" + kind}>
+                      {kind === "ai" ? "API Base URL" : "网关 URL"}
+                    </Label>
+                    <Input
+                      className="min-h-11"
+                      id={"provider-url-" + kind}
+                      type="url"
+                      autoComplete="off"
+                      value={
+                        kind === "ai" ? draft.ai.base_url : draft[kind].url
+                      }
+                      placeholder={
+                        kind === "ai"
+                          ? "https://api.example.com/v1"
+                          : "https://gateway.example.com/endpoint"
+                      }
+                      disabled={busy || !!testing}
+                      onChange={(e) =>
+                        change(
+                          kind,
+                          kind === "ai" ? "base_url" : "url",
+                          e.target.value,
+                        )
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      留空并保存可禁用此服务。URL
+                      不得包含内嵌密码，请使用独立密钥字段。
+                    </p>
+                  </div>
+                )}
                 {kind === "ai" && (
                   <div className="space-y-2">
                     <Label htmlFor="provider-model-ai">模型名称</Label>
@@ -317,45 +348,49 @@ export default function ProvidersPage({ onSaved }: { onSaved: () => void }) {
                     />
                   </div>
                 )}
-                <Separator />
-                <div className="space-y-2">
-                  <Label htmlFor={"provider-secret-" + kind}>
-                    <KeyRound className="mr-1 inline size-4" />
-                    API 密钥
-                  </Label>
-                  <Input
-                    className="min-h-11"
-                    id={"provider-secret-" + kind}
-                    type="password"
-                    value={draft[kind].secret}
-                    disabled={busy || !!testing || draft[kind].clear_secret}
-                    autoComplete="new-password"
-                    spellCheck={false}
-                    placeholder={
-                      settings[kind].has_secret
-                        ? "已存密钥不回显，留空保留"
-                        : "尚未保存密钥"
-                    }
-                    onChange={(e) => change(kind, "secret", e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {settings[kind].has_secret
-                      ? "服务端已有密钥。"
-                      : "服务端尚无密钥。"}
-                    空白输入表示保留，不会清空；不使用 localStorage 保存。
-                  </p>
-                </div>
-                <Label className="flex min-h-11 items-center gap-3">
-                  <Checkbox
-                    checked={draft[kind].clear_secret}
-                    disabled={busy || !!testing}
-                    onCheckedChange={(v) => {
-                      if (v) change(kind, "secret", "");
-                      change(kind, "clear_secret", v === true);
-                    }}
-                  />
-                  保存时明确清除已存密钥
-                </Label>
+                {!(kind === "card" && draft.card.mode === "omr") && (
+                  <>
+                    <Separator />
+                    <div className="space-y-2">
+                      <Label htmlFor={"provider-secret-" + kind}>
+                        <KeyRound className="mr-1 inline size-4" />
+                        API 密钥
+                      </Label>
+                      <Input
+                        className="min-h-11"
+                        id={"provider-secret-" + kind}
+                        type="password"
+                        value={draft[kind].secret}
+                        disabled={busy || !!testing || draft[kind].clear_secret}
+                        autoComplete="new-password"
+                        spellCheck={false}
+                        placeholder={
+                          settings[kind].has_secret
+                            ? "已存密钥不回显，留空保留"
+                            : "尚未保存密钥"
+                        }
+                        onChange={(e) => change(kind, "secret", e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {settings[kind].has_secret
+                          ? "服务端已有密钥。"
+                          : "服务端尚无密钥。"}
+                        空白输入表示保留，不会清空；不使用 localStorage 保存。
+                      </p>
+                    </div>
+                    <Label className="flex min-h-11 items-center gap-3">
+                      <Checkbox
+                        checked={draft[kind].clear_secret}
+                        disabled={busy || !!testing}
+                        onCheckedChange={(v) => {
+                          if (v) change(kind, "secret", "");
+                          change(kind, "clear_secret", v === true);
+                        }}
+                      />
+                      保存时明确清除已存密钥
+                    </Label>
+                  </>
+                )}
                 {results[kind] && (
                   <Feedback error={!results[kind]!.ok}>
                     {providerNames[kind]}：
@@ -369,15 +404,17 @@ export default function ProvidersPage({ onSaved }: { onSaved: () => void }) {
                 )}
               </CardContent>
               <CardFooter className="flex-wrap gap-3">
-                <Button
-                  className="min-h-11"
-                  variant="outline"
-                  disabled={busy || !!testing || dirty}
-                  onClick={() => setTestTarget(kind)}
-                >
-                  <FlaskConical />
-                  {testing === kind ? "正在测试" : "测试已保存配置"}
-                </Button>
+                {!(kind === "card" && draft.card.mode === "omr") && (
+                  <Button
+                    className="min-h-11"
+                    variant="outline"
+                    disabled={busy || !!testing || dirty}
+                    onClick={() => setTestTarget(kind)}
+                  >
+                    <FlaskConical />
+                    {testing === kind ? "正在测试" : "测试已保存配置"}
+                  </Button>
+                )}
                 <p className="text-xs text-muted-foreground">
                   {dirty
                     ? "先保存或重新读取，避免测试与编辑值混淆。"

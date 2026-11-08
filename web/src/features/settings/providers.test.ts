@@ -12,7 +12,7 @@ const settings = {
   revision: 4,
   source: "database" as const,
   encryption_ready: true,
-  storage_mode: "postgres",
+  storage_mode: "sqlite",
   ocr: { url: "https://ocr.example.test", has_secret: true, configured: true },
   ai: {
     base_url: "https://ai.example.test/v1",
@@ -130,4 +130,23 @@ it("shows actionable conflict copy without exposing server detail", () => {
   expect(message).toContain("关闭确认框");
   expect(message).toContain("手动合并");
   expect(providerSaveError(new Error("保存失败"))).toBe("保存失败");
+});
+
+describe("answer card recognition mode", () => {
+  it("defaults to built-in OMR without a gateway URL", () => {
+    const draft = draftFromSettings({
+      ...settings,
+      card: { url: "", has_secret: false, configured: false, mode: "omr" },
+    });
+    expect(draft.card.mode).toBe("omr");
+    const payload = providerPayload(settings.revision, draft);
+    expect(payload.card).toMatchObject({ mode: "omr", url: "" });
+  });
+
+  it("still validates the URL when the external card gateway is selected", () => {
+    const draft = draftFromSettings(settings);
+    draft.card.mode = "gateway";
+    draft.card.url = "not-a-url";
+    expect(() => providerPayload(settings.revision, draft)).toThrow();
+  });
 });
