@@ -53,6 +53,8 @@ AI Base URL填OpenAI-compatible基址（通常含/v1），模型填供应商实�
 
 例子：一份 20 题 ABC 听力 + 15 题 ABCD 阅读 + 5 题 A–G 七选五 + 20 题 ABCD 知识运用的 60 题试卷，可以直接在答题卡设置页点“英语60题模板”生成，再改分值和答案。
 
+样板见 [英语卡预览](<preview/english-card-a5-v3.png>)（实际渲染，A4 上下双联）与 [已填涂样例](<preview/english-card-filled.png>)。
+
 ## 手机连续扫描
 
 使用Safari/Chrome HTTPS前台相机，一次授权后自动找卡/稳定选帧。完整OMR在独立Web Worker中进行，识别学号、选项和状态；二维码不用于换学生锁。按学号+换卡运动防重复，最多3个本地待提交任务，保留原幂等键。Go根据同一张证据图独立定位、读取学号/答案、查冻结名单与计分；客户端预览不是成绩，只有正式committed才绿灯/成功音。
