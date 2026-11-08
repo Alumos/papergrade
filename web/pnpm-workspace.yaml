@@ -47,5 +47,9 @@ minimumReleaseAgeExclude:
   - "tailwindcss@4.3.5"
   - "@dotenvx/primitives@4.4.0"
 
+overrides:
+  parse5: 8.0.0
+
 allowBuilds:
+  core-js: false
   esbuild: true

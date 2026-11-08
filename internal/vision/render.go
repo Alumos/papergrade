@@ -33,6 +33,12 @@ func qrMatrix(token string) ([][]bool, error) {
 // RenderSVG emits a self-contained printable A4 document, with no external
 // resources and with all user-supplied text XML-escaped. QR encodes raw token.
 func RenderSVG(m Manifest, title, studentLabel, token string) ([]byte, error) {
+	if m.Version == StudentVersion {
+		return renderStudentSVG(m, title, studentLabel, token)
+	}
+	if m.Version == EnglishVersion {
+		return renderEnglishSVG(m, title, studentLabel, token)
+	}
 	if err := validateManifest(m); err != nil {
 		return nil, err
 	}
@@ -104,9 +110,13 @@ func RenderPNG(m Manifest, token string, width int) ([]byte, error) {
 	if width < 700 || width > 2000 {
 		return nil, ErrImageSize
 	}
-	qr, err := qrMatrix(token)
-	if err != nil {
-		return nil, err
+	var qr [][]bool
+	var err error
+	if token != "" || m.Version != StudentVersion {
+		qr, err = qrMatrix(token)
+		if err != nil {
+			return nil, err
+		}
 	}
 	im := raster(m, qr, width)
 	var b bytes.Buffer
@@ -114,7 +124,7 @@ func RenderPNG(m Manifest, token string, width int) ([]byte, error) {
 	return b.Bytes(), err
 }
 func raster(m Manifest, qr [][]bool, width int) *image.Gray {
-	height := int(math.Round(float64(width) * 297 / 210))
+	height := int(math.Round(float64(width) * m.HeightMM / m.WidthMM))
 	im := image.NewGray(image.Rect(0, 0, width, height))
 	for i := range im.Pix {
 		im.Pix[i] = 255
@@ -129,7 +139,7 @@ func raster(m Manifest, qr [][]bool, width int) *image.Gray {
 		}
 	}
 	for _, p := range m.Markers {
-		rect(Box{p.X - m.MarkerSize/2, p.Y - m.MarkerSize*210/297/2, m.MarkerSize, m.MarkerSize * 210 / 297}, 0)
+		rect(Box{p.X - m.MarkerSize/2, p.Y - m.MarkerSize*m.WidthMM/m.HeightMM/2, m.MarkerSize, m.MarkerSize * m.WidthMM / m.HeightMM}, 0)
 	}
 	rect(m.BlackReference, 0)
 	// White reference center intentionally remains unprinted.
@@ -141,8 +151,35 @@ func raster(m Manifest, qr [][]bool, width int) *image.Gray {
 			}
 		}
 	}
-	for _, b := range m.Bubbles {
+	allBubbles := append([]Bubble(nil), m.Bubbles...)
+	for _, d := range m.StudentBubbles {
+		allBubbles = append(allBubbles, Bubble{X: d.X, Y: d.Y, R: d.R})
+	}
+	english := m.Version == EnglishVersion
+	for _, b := range allBubbles {
 		cx, cy, r := b.X*float64(width), b.Y*float64(height), b.R*float64(width)
+		if english {
+			// English cards print a square fill cell with the option letter inside.
+			// The raster mirrors that: an outlined square plus a small centre mark
+			// standing for the printed glyph, so tests exercise real template ink
+			// instead of a clean circle the printed card never has.
+			for y := int(cy - r - 1); y <= int(cy+r+1); y++ {
+				for x := int(cx - r - 1); x <= int(cx+r+1); x++ {
+					dx, dy := math.Abs(float64(x)-cx), math.Abs(float64(y)-cy)
+					onEdge := math.Abs(dx-r) < .8 && dy <= r+1 || math.Abs(dy-r) < .8 && dx <= r+1
+					if onEdge {
+						im.SetGray(x, y, color.Gray{0})
+					}
+				}
+			}
+			glyph := r * .42
+			for y := int(cy - glyph); y <= int(cy+glyph); y++ {
+				for x := int(cx - glyph*.7); x <= int(cx+glyph*.7); x++ {
+					im.SetGray(x, y, color.Gray{0})
+				}
+			}
+			continue
+		}
 		for y := int(cy - r - 1); y <= int(cy+r+1); y++ {
 			for x := int(cx - r - 1); x <= int(cx+r+1); x++ {
 				d := math.Hypot(float64(x)-cx, float64(y)-cy)

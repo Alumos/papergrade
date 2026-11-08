@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { Printer } from "lucide-react";
+import { Printer, Download } from "lucide-react";
+import {
+  fetchPrintSheet,
+  downloadTwoUpPDF,
+  downloadTwoUpSVG,
+} from "./printSheet";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,6 +29,13 @@ import type { Exam, Sheet, Manifest } from "@/types";
 export default function PrintPanel({ exam }: { exam: Exam }) {
   const sheets = useRemote<{ items: Sheet[] }>("/exams/" + exam.id + "/sheets"),
     manifest = useRemote<Manifest>("/exams/" + exam.id + "/template");
+  // Both fixed half-A4 cards print two-up and require cutting before scanning.
+  // The English card (a5-v3) uses the same rule, so never test for one version.
+  const twoUp =
+    manifest.data?.version === "a5-v2" || manifest.data?.version === "a5-v3";
+  const english = manifest.data?.version === "a5-v3";
+  const digits =
+    exam.student_number_digits ?? manifest.data?.student_number_digits ?? "";
   const [selected, setSelected] = useState<string[]>([]),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
@@ -31,7 +43,41 @@ export default function PrintPanel({ exam }: { exam: Exam }) {
     setBusy(true);
     setError("");
     try {
-      await printCards(exam.id, ids);
+      if (!twoUp) {
+        await printCards(exam.id, ids);
+        return;
+      }
+      const popup = window.open("about:blank", "_blank");
+      if (!popup) throw new Error("请允许打印窗口");
+      popup.document.body.textContent = "正在准备A4双联答题卡…";
+      try {
+        const sources: string[] = [];
+        for (let i = 0; i < ids.length; i += 2)
+          sources.push(await fetchPrintSheet(exam.id, ids.slice(i, i + 2)));
+        popup.document.body.textContent = "";
+        const style = popup.document.createElement("style");
+        style.textContent =
+          "@page{size:A4;margin:0}body{margin:0}img{width:210mm;height:297mm;display:block;break-after:page}";
+        popup.document.head.append(style);
+        await Promise.all(
+          sources.map(
+            (svg) =>
+              new Promise<void>((resolve, reject) => {
+                const img = popup.document.createElement("img");
+                img.onload = () => resolve();
+                img.onerror = () => reject(new Error("模板无法显示"));
+                img.src =
+                  "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+                popup.document.body.append(img);
+              }),
+          ),
+        );
+        popup.focus();
+        popup.print();
+      } catch (e) {
+        popup.close();
+        throw e;
+      }
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -42,8 +88,11 @@ export default function PrintPanel({ exam }: { exam: Exam }) {
     <div className="space-y-5">
       <Feedback>
         模板 {manifest.data?.version ?? "加载中"} · A4 原尺寸 100%
-        打印，不要缩放或裁去四角。每人使用独立二维码。可在浏览器打印窗口另存
-        PDF。
+        打印，不要缩放或裁去四角。
+        {twoUp
+          ? "新卡A4上下两份，沿中线裁切后每次只扫一张210×148.5mm卡。试卷二维码全班相同，仅匹配试卷，不作学生身份。"
+          : "旧版每人独立二维码。"}
+        可在打印窗口另存PDF。
       </Feedback>
       {(error || sheets.error || manifest.error) && (
         <Feedback error>{error || sheets.error || manifest.error}</Feedback>
@@ -54,7 +103,14 @@ export default function PrintPanel({ exam }: { exam: Exam }) {
             <div className="space-y-2">
               <CardTitle>个人答题卡</CardTitle>
               <CardDescription>
-                选择需要打印的学生，卡片由服务器生成。
+                选择学生，卡片由服务端固定版式生成。
+                {twoUp
+                  ? english
+                    ? "英语卡：学号固定填涂4位数字（例如19班32号填1932），每行只能涂一个数字。选项框里印着字母，2B涂满整个方框即可；七选五为A–G。"
+                    : "学号必须按 " +
+                      digits +
+                      " 位逐列填涂，前导零不可漏填。2B涂满，每列只选一位；姓名/学号手写区不代替填涂。"
+                  : ""}
               </CardDescription>
             </div>
             <Button
@@ -68,6 +124,69 @@ export default function PrintPanel({ exam }: { exam: Exam }) {
           </div>
         </CardHeader>
         <CardContent>
+          {twoUp && (
+            <div className="mb-5 space-y-3">
+              <p className="text-sm">
+                已选 {selected.length} 人 · A4 {Math.ceil(selected.length / 2)}{" "}
+                页（末页奇数时下半留空）
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  className="min-h-11"
+                  variant="outline"
+                  disabled={
+                    busy || selected.length === 0 || selected.length > 2
+                  }
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      await downloadTwoUpSVG(exam.id, selected);
+                    } catch (e) {
+                      setError(errorText(e));
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  <Download />
+                  下载双联SVG（最多2人）
+                </Button>
+                <Button
+                  className="min-h-11"
+                  variant="outline"
+                  disabled={
+                    busy || selected.length === 0 || selected.length > 2
+                  }
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      await downloadTwoUpPDF(exam.id, selected);
+                    } catch (e) {
+                      setError(errorText(e));
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  <Download />
+                  下载真实PDF（最多2人）
+                </Button>
+              </div>
+              <div className="mx-auto w-48 border bg-white text-center text-xs text-muted-foreground">
+                <div className="h-32 grid place-content-center">
+                  上联 · 210×148.5mm
+                  <br />
+                  学号填涂 + 客观题
+                </div>
+                <div className="border-t border-dashed py-1">裁切线</div>
+                <div className="h-32 grid place-content-center">
+                  {selected.length % 2 === 1
+                    ? "末页下联留白"
+                    : "下联 · 210×148.5mm"}
+                </div>
+              </div>
+            </div>
+          )}
           {sheets.loading ? (
             <Loading />
           ) : !sheets.data?.items.length ? (

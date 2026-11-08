@@ -55,6 +55,7 @@ type App struct {
 	loginMu              sync.Mutex
 	failures             map[string]attempt
 	heavy                chan struct{}
+	ocrSlot              chan struct{}
 	loginSlot            chan struct{}
 	providerCipher       cipher.AEAD
 	ephemeralProviderKey bool
@@ -96,7 +97,7 @@ func New(ctx context.Context, c Config) (*App, error) {
 	if e != nil {
 		return nil, e
 	}
-	a := &App{Store: s, Config: c, failures: map[string]attempt{}, heavy: make(chan struct{}, 1), loginSlot: make(chan struct{}, 1), providerCipher: providerCipher, ephemeralProviderKey: ephemeral}
+	a := &App{Store: s, Config: c, failures: map[string]attempt{}, heavy: make(chan struct{}, 1), ocrSlot: make(chan struct{}, 1), loginSlot: make(chan struct{}, 1), providerCipher: providerCipher, ephemeralProviderKey: ephemeral}
 	if e = os.MkdirAll(c.DataDir, 0700); e != nil {
 		s.Close()
 		return nil, e

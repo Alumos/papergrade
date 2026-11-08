@@ -7,9 +7,18 @@ import (
 	"unicode/utf8"
 )
 
+// BuildManifest is the immutable legacy a4-v1 layout. English cards use
+// buildManifestCore with wider limits and then replace the physical layout.
 func BuildManifest(questions []Question) (Manifest, error) {
-	if len(questions) < 1 || len(questions) > MaxQuestions {
-		return Manifest{}, fmt.Errorf("%w: require 1..40 questions", ErrInvalidManifest)
+	return buildManifestCore(questions, MaxQuestions, 5)
+}
+
+// buildManifestCore validates question semantics and fills the legacy a4-v1
+// bubble grid. Callers that own a different physical layout must rebuild
+// Bubbles afterwards. Options are limited per version, never silently clipped.
+func buildManifestCore(questions []Question, maxQuestions, maxOptions int) (Manifest, error) {
+	if len(questions) < 1 || len(questions) > maxQuestions {
+		return Manifest{}, fmt.Errorf("%w: require 1..%d questions", ErrInvalidManifest, maxQuestions)
 	}
 	m := Manifest{Version: Version, CoordinateSpace: "normalized", WidthMM: 210, HeightMM: 297, MarkerSize: .024,
 		Markers: []Point{{.05, .05}, {.95, .05}, {.95, .95}, {.05, .95}},
@@ -24,8 +33,8 @@ func BuildManifest(questions []Question) (Manifest, error) {
 		if q.Type != "single_choice" && q.Type != "multiple_choice" && q.Type != "true_false" {
 			return Manifest{}, fmt.Errorf("%w: unknown question type", ErrInvalidManifest)
 		}
-		if len(q.Options) < 2 || len(q.Options) > 5 || (q.Type == "true_false" && len(q.Options) != 2) {
-			return Manifest{}, fmt.Errorf("%w: require 2..5 options (true_false: 2)", ErrInvalidManifest)
+		if len(q.Options) < 2 || len(q.Options) > maxOptions || (q.Type == "true_false" && len(q.Options) != 2) {
+			return Manifest{}, fmt.Errorf("%w: require 2..%d options (true_false: 2)", ErrInvalidManifest, maxOptions)
 		}
 		seen := map[string]bool{}
 		for _, o := range q.Options {
@@ -48,6 +57,15 @@ func BuildManifest(questions []Question) (Manifest, error) {
 // extra questions into an otherwise version-matching manifest.
 func validateManifest(m Manifest) error {
 	canonical, err := BuildManifest(m.Questions)
+	if m.Version == StudentVersion {
+		canonical, err = BuildStudentManifest(m.Questions, m.StudentNumberDigits)
+	} else if m.Version == EnglishVersion {
+		qs := make([]EnglishQuestion, len(m.Questions))
+		for i, q := range m.Questions {
+			qs[i] = EnglishQuestion{Question: q}
+		}
+		canonical, err = BuildEnglishManifest(qs)
+	}
 	if err != nil || !reflect.DeepEqual(m, canonical) {
 		return ErrInvalidManifest
 	}

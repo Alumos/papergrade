@@ -24,6 +24,9 @@ type sealedProviders struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 type providerEndpoint struct {
+	Type        string `json:"type,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Mode        string `json:"mode,omitempty"`
 	URL         string `json:"url"`
 	Secret      string `json:"secret,omitempty"`
 	ClearSecret bool   `json:"clear_secret,omitempty"`
@@ -138,9 +141,21 @@ func (a *App) cloud(ctx context.Context) (*provider.Client, error) {
 	}
 	return provider.New(cfg), nil
 }
+func ocrType(cfg provider.Config) string {
+	if cfg.OCRType == "ollama" {
+		return "ollama"
+	}
+	return "gateway"
+}
+func cardMode(cfg provider.Config) string {
+	if cfg.CardMode == "gateway" {
+		return "gateway"
+	}
+	return "omr"
+}
 func (a *App) settingsView(cfg provider.Config, rev int, source string) map[string]any {
 	caps := provider.New(cfg).Capabilities()
-	out := map[string]any{"revision": rev, "source": source, "storage_mode": a.Store.Mode(), "encryption_ready": a.providerCipher != nil, "ocr": map[string]any{"url": cfg.OCRURL, "has_secret": cfg.OCRKey != "", "configured": caps["ocr_configured"]}, "ai": map[string]any{"base_url": cfg.AIBaseURL, "model": cfg.AIModel, "has_secret": cfg.AIKey != "", "configured": caps["ai_configured"]}, "card": map[string]any{"url": cfg.CardURL, "has_secret": cfg.CardKey != "", "configured": caps["card_configured"]}}
+	out := map[string]any{"revision": rev, "source": source, "storage_mode": a.Store.Mode(), "encryption_ready": a.providerCipher != nil, "ocr": map[string]any{"type": ocrType(cfg), "model": cfg.OCRModel, "url": cfg.OCRURL, "has_secret": cfg.OCRKey != "", "configured": caps["ocr_configured"]}, "ai": map[string]any{"base_url": cfg.AIBaseURL, "model": cfg.AIModel, "has_secret": cfg.AIKey != "", "configured": caps["ai_configured"]}, "card": map[string]any{"mode": cardMode(cfg), "url": cfg.CardURL, "has_secret": cfg.CardKey != "", "configured": caps["card_configured"]}}
 	if a.ephemeralProviderKey {
 		out["warning"] = "memory_dev settings and encryption key are ephemeral; all settings disappear on restart"
 	} else if a.providerCipher == nil {
@@ -190,7 +205,7 @@ func (a *App) putProviders(w http.ResponseWriter, r *http.Request) {
 		if in.Revision != current {
 			return conflict("stale provider settings revision")
 		}
-		cfg = provider.Config{OCRURL: in.OCR.URL, AIBaseURL: in.AI.BaseURL, AIModel: in.AI.Model, CardURL: in.Card.URL, Timeout: 90 * time.Second}
+		cfg = provider.Config{OCRType: in.OCR.Type, OCRModel: in.OCR.Model, CardMode: in.Card.Mode, OCRURL: in.OCR.URL, AIBaseURL: in.AI.BaseURL, AIModel: in.AI.Model, CardURL: in.Card.URL, Timeout: 90 * time.Second}
 		if cfg.OCRKey, e = chooseSecret(old.OCRKey, in.OCR.Secret, in.OCR.ClearSecret); e != nil {
 			return e
 		}
@@ -211,7 +226,7 @@ func (a *App) putProviders(w http.ResponseWriter, r *http.Request) {
 		if e = t.Put("settings", "providers", "", "", sealedProviders{rev, sealed, time.Now().UTC()}); e != nil {
 			return e
 		}
-		return t.Put("settings_audit", ID(), "providers", "", map[string]any{"revision": rev, "previous_revision": current, "action": "provider_settings_updated", "actor": "teacher", "at": time.Now().UTC(), "changed": map[string]bool{"ocr": old.OCRURL != cfg.OCRURL || old.OCRKey != cfg.OCRKey, "ai": old.AIBaseURL != cfg.AIBaseURL || old.AIModel != cfg.AIModel || old.AIKey != cfg.AIKey, "card": old.CardURL != cfg.CardURL || old.CardKey != cfg.CardKey}})
+		return t.Put("settings_audit", ID(), "providers", "", map[string]any{"revision": rev, "previous_revision": current, "action": "provider_settings_updated", "actor": "teacher", "at": time.Now().UTC(), "changed": map[string]bool{"ocr": old.OCRURL != cfg.OCRURL || old.OCRKey != cfg.OCRKey || old.OCRType != cfg.OCRType || old.OCRModel != cfg.OCRModel, "ai": old.AIBaseURL != cfg.AIBaseURL || old.AIModel != cfg.AIModel || old.AIKey != cfg.AIKey, "card": old.CardURL != cfg.CardURL || old.CardKey != cfg.CardKey || old.CardMode != cfg.CardMode}})
 	})
 	if e != nil {
 		fail(w, e)

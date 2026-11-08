@@ -20,7 +20,7 @@ const testToken = "sheet_opaque_random_token_0123456789"
 
 func fixture(t *testing.T) (Manifest, *image.Gray) {
 	t.Helper()
-	m, err := BuildManifest([]Question{{"q1", "1", "single_choice", []string{"A", "B", "C", "D"}}, {"q2", "2", "multiple_choice", []string{"A", "B", "C"}}, {"q3", "3", "true_false", []string{"T", "F"}}})
+	m, err := BuildManifest([]Question{{ID: "q1", Number: "1", Type: "single_choice", Options: []string{"A", "B", "C", "D"}}, {ID: "q2", Number: "2", Type: "multiple_choice", Options: []string{"A", "B", "C"}}, {ID: "q3", Number: "3", Type: "true_false", Options: []string{"T", "F"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestRejectMalformedAndPoorImages(t *testing.T) {
 func TestManifestAndSVG(t *testing.T) {
 	questions := make([]Question, 40)
 	for i := range questions {
-		questions[i] = Question{fmt.Sprintf("q%d", i), fmt.Sprint(i + 1), "single_choice", []string{"A", "B", "C", "D", "E"}}
+		questions[i] = Question{ID: fmt.Sprintf("q%d", i), Number: fmt.Sprint(i + 1), Type: "single_choice", Options: []string{"A", "B", "C", "D", "E"}}
 	}
 	m, err := BuildManifest(questions)
 	if err != nil {
@@ -266,7 +266,7 @@ func TestManifestAndSVG(t *testing.T) {
 	}
 }
 func TestInvalidManifest(t *testing.T) {
-	for _, qs := range [][]Question{nil, make([]Question, 41), {{"q", "1", "unknown", []string{"A", "B"}}}, {{"q", "1", "single_choice", []string{"A", "A"}}}, {{"q", "1", "true_false", []string{"A", "B", "C"}}}, {{"q", "1", "single_choice", []string{"A", "B"}}, {"q", "2", "single_choice", []string{"A", "B"}}}} {
+	for _, qs := range [][]Question{nil, make([]Question, 41), {{ID: "q", Number: "1", Type: "unknown", Options: []string{"A", "B"}}}, {{ID: "q", Number: "1", Type: "single_choice", Options: []string{"A", "A"}}}, {{ID: "q", Number: "1", Type: "true_false", Options: []string{"A", "B", "C"}}}, {{ID: "q", Number: "1", Type: "single_choice", Options: []string{"A", "B"}}, {ID: "q", Number: "2", Type: "single_choice", Options: []string{"A", "B"}}}} {
 		if _, err := BuildManifest(qs); err == nil {
 			t.Fatalf("accepted invalid questions %+v", qs)
 		}

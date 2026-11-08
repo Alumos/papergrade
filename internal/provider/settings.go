@@ -11,10 +11,29 @@ import (
 )
 
 // ValidateConfig checks administrator-supplied endpoints without echoing credentials.
+func isCGNAT(ip net.IP) bool {
+	v := ip.To4()
+	return v != nil && v[0] == 100 && v[1] >= 64 && v[1] <= 127
+}
 func ValidateConfig(c Config) error {
-	for _, raw := range []string{c.OCRURL, c.AIBaseURL, c.CardURL} {
+	if c.OCRType != "" && c.OCRType != "gateway" && c.OCRType != "ollama" {
+		return errors.New("OCR type must be gateway or ollama")
+	}
+	if c.CardMode != "" && c.CardMode != "omr" && c.CardMode != "gateway" {
+		return errors.New("card mode must be omr or gateway")
+	}
+	if len(c.OCRModel) > 200 || strings.IndexFunc(c.OCRModel, unicode.IsControl) >= 0 {
+		return errors.New("OCR model name invalid")
+	}
+	for i, raw := range []string{c.OCRURL, c.AIBaseURL, c.CardURL} {
 		if raw == "" {
 			continue
+		}
+		if i == 0 && c.OCRType == "ollama" {
+			u, e := url.Parse(raw)
+			if e != nil || (u.Path != "" && u.Path != "/") {
+				return errors.New("Ollama URL must be a base origin without /api/chat")
+			}
 		}
 		if len(raw) > 2048 || strings.TrimSpace(raw) != raw {
 			return errors.New("provider URL is invalid")
@@ -25,7 +44,8 @@ func ValidateConfig(c Config) error {
 		}
 		if u.Scheme == "http" {
 			ip := net.ParseIP(u.Hostname())
-			if u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			privateOllama := i == 0 && c.OCRType == "ollama" && ip != nil && (ip.IsPrivate() || isCGNAT(ip))
+			if u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) && !privateOllama {
 				return errors.New("provider URLs require HTTPS except loopback development gateways")
 			}
 		}
@@ -47,6 +67,9 @@ func (c *Client) TestConnection(ctx context.Context, kind string) (ConnectionRes
 	endpoint, key, method := c.cfg.OCRURL, c.cfg.OCRKey, http.MethodHead
 	switch kind {
 	case "ocr":
+		if c.cfg.OCRType == "ollama" {
+			endpoint, method = strings.TrimRight(c.cfg.OCRURL, "/")+"/api/tags", http.MethodGet
+		}
 	case "card":
 		endpoint, key = c.cfg.CardURL, c.cfg.CardKey
 	case "ai":
@@ -65,6 +88,12 @@ func (c *Client) TestConnection(ctx context.Context, kind string) (ConnectionRes
 		check.AIBaseURL = c.cfg.AIBaseURL
 	} else {
 		check.OCRURL = endpoint
+		if kind == "ocr" && c.cfg.OCRType == "ollama" {
+			check.OCRURL = c.cfg.OCRURL
+		}
+		if kind == "ocr" {
+			check.OCRType = c.cfg.OCRType
+		}
 	}
 	if e := ValidateConfig(check); e != nil {
 		return ConnectionResult{}, errors.New("provider endpoint invalid")
@@ -77,7 +106,13 @@ func (c *Client) TestConnection(ctx context.Context, kind string) (ConnectionRes
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	req.Header.Set("Accept", "application/json")
-	res, e := c.http.Do(req)
+	httpClient := c.http
+	if kind == "ocr" && ollamaPrivate(c.cfg) {
+		copyClient := *c.http
+		copyClient.Transport = directOllamaTransport
+		httpClient = &copyClient
+	}
+	res, e := httpClient.Do(req)
 	if e != nil {
 		return ConnectionResult{}, errors.New("provider connection failed")
 	}

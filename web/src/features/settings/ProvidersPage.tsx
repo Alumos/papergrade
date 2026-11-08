@@ -21,6 +21,13 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -226,6 +233,47 @@ export default function ProvidersPage({ onSaved }: { onSaved: () => void }) {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
+                {kind === "ocr" && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>OCR 类型</Label>
+                      <Select
+                        value={draft.ocr.type}
+                        onValueChange={(v) => change("ocr", "type", v)}
+                        disabled={busy || !!testing}
+                      >
+                        <SelectTrigger className="min-h-11 w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="gateway">文档 Gateway</SelectItem>
+                          <SelectItem value="ollama">
+                            原生 Ollama（可选密钥）
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="provider-model-ocr">OCR 模型名称</Label>
+                      <Input
+                        id="provider-model-ocr"
+                        className="min-h-11"
+                        value={draft.ocr.model}
+                        disabled={busy || !!testing}
+                        onChange={(e) => change("ocr", "model", e.target.value)}
+                        placeholder="填写 NAS 实际已安装的模型 ID"
+                      />
+                    </div>
+                    {draft.ocr.type === "ollama" && (
+                      <Feedback>
+                        填写 Ollama 基础地址，不要加 /api/chat；原生服务可无 API
+                        Key。HTTP 仅供明确选择的局域网/VPN IP，公网 VPS 需 VPN
+                        或 HTTPS 代理，容器 localhost 不是 NAS。PDF
+                        在浏览器逐页转换图片。
+                      </Feedback>
+                    )}
+                  </>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor={"provider-url-" + kind}>
                     {kind === "ai" ? "API Base URL" : "网关 URL"}
@@ -407,8 +455,7 @@ export default function ProvidersPage({ onSaved }: { onSaved: () => void }) {
             </DialogTitle>
             <DialogDescription>
               使用服务器已保存的配置（版本 {settings.revision}
-              ）发出真实网络请求。网关使用 HEAD，AI 查询
-              models，不发送试卷或执行收费推理，但供应商可能记录请求。通过不保证识别效果。
+              ）发出真实网络请求。Gateway使用HEAD，Ollama读取/api/tags，AI查询models；不发送试卷或执行推理，但供应商可能记录请求。通过不保证识别效果。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

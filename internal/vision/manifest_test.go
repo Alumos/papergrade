@@ -10,7 +10,7 @@ import (
 func TestManifestGeometryAndIsolation(t *testing.T) {
 	qs := make([]Question, 40)
 	for i := range qs {
-		qs[i] = Question{fmt.Sprintf("q%d", i), fmt.Sprint(i + 1), "single_choice", []string{"A", "B", "C", "D", "E"}}
+		qs[i] = Question{ID: fmt.Sprintf("q%d", i), Number: fmt.Sprint(i + 1), Type: "single_choice", Options: []string{"A", "B", "C", "D", "E"}}
 	}
 	m, err := BuildManifest(qs)
 	if err != nil {
@@ -49,7 +49,7 @@ func TestManifestGeometryAndIsolation(t *testing.T) {
 	}
 }
 func TestManifestInvalidText(t *testing.T) {
-	base := Question{"q", "1", "single_choice", []string{"A", "B"}}
+	base := Question{ID: "q", Number: "1", Type: "single_choice", Options: []string{"A", "B"}}
 	for _, value := range []string{"", "\x00", string([]byte{0xff})} {
 		q := base
 		q.Number = value

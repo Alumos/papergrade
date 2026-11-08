@@ -6,6 +6,7 @@ import (
 	"github.com/papergrade/papergrade/internal/provider"
 	"github.com/papergrade/papergrade/internal/store"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -73,7 +74,7 @@ func (a *App) adopt(w http.ResponseWriter, r *http.Request) {
 			if len(q.Answer) == 0 {
 				flags = append(flags, "missing_answer")
 			}
-			candidate := grading.Question{ID: ID(), Number: q.Number, Type: q.Type, Options: q.Options, Answer: q.Answer, ScoreUnits: score, ReviewFlags: flags}
+			candidate := grading.Question{ID: ID(), Number: q.Number, Type: q.Type, Options: q.Options, Answer: q.Answer, ScoreUnits: score, ReviewFlags: flags, Section: strings.TrimSpace(q.Section)}
 			if e = grading.Validate([]grading.Question{candidate}, false); e != nil {
 				skipped = append(skipped, map[string]string{"number": q.Number, "reason": e.Error()})
 				continue

@@ -1,4 +1,7 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { preparePDF } from "./pdf";
+import PageEvidence from "./PageEvidence";
+const SafeMarkdown = lazy(() => import("./Markdown"));
 import {
   Dialog,
   DialogContent,
@@ -50,7 +53,9 @@ export default function DocumentsPage({
     [id, setID] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
-    [message, setMessage] = useState("");
+    [message, setMessage] = useState(""),
+    [pageProgress, setPageProgress] = useState(""),
+    [preparedDocumentID, setPreparedDocumentID] = useState("");
   useEffect(() => {
     if (
       !documents.data?.items.some((d) =>
@@ -66,9 +71,13 @@ export default function DocumentsPage({
     setBusy(true);
     setError("");
     try {
-      if (!file.name.toLowerCase().endsWith(".pdf"))
-        throw new Error("请选择 PDF");
-      if (file.size > 20 * 1024 * 1024) throw new Error("PDF 不能超过20MB");
+      const isPDF =
+        file.type === "application/pdf" ||
+        file.name.toLowerCase().endsWith(".pdf");
+      if (!isPDF && !/^image\/(jpeg|png|webp)$/.test(file.type))
+        throw new Error("请选择PDF/JPEG/PNG/WEBP");
+      if (file.size > (isPDF ? 20 : 4) * 1024 * 1024)
+        throw new Error(isPDF ? "PDF不能超过20MB" : "图片不能超过4MB");
       const form = new FormData();
       form.set("file", file);
       const result = await api<DocumentItem>(
@@ -76,10 +85,52 @@ export default function DocumentsPage({
         { method: "POST", body: form },
       );
       setID(result.id);
-      setMessage("PDF 已上传，尚不代表已解析。");
+      setPreparedDocumentID(result.id);
+      setMessage("原文件已上传；PDF需在本机浏览器逐页准备，随后显式请求解析。");
       documents.reload();
     } catch (e) {
       setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const prepare = async () => {
+    if (!file || !id) return;
+    setBusy(true);
+    setError("");
+    try {
+      setPageProgress("正在载入本地PDF.js…");
+      const original = await fetch("/api/v1/documents/" + id + "/file", {
+        credentials: "same-origin",
+      });
+      if (!original.ok) throw new Error("无法验证原PDF，请重新上传");
+      const actual = new Uint8Array(await original.arrayBuffer()),
+        chosen = new Uint8Array(await file.arrayBuffer());
+      if (
+        actual.length !== chosen.length ||
+        actual.some((v, i) => v !== chosen[i])
+      )
+        throw new Error("重新选择的PDF与服务端原件不一致，不允许混合页证据");
+      const prepared = await api<{ items: { page_number: number }[] }>(
+        "/exams/" + exam.id + "/documents/" + id + "/pages",
+      );
+      const readyPages = new Set(prepared.items.map((p) => p.page_number));
+      await preparePDF(
+        exam.id,
+        id,
+        file,
+        (n, total) => {
+          setPageProgress("已准备 " + n + " / " + total + " 页");
+          documents.reload();
+        },
+        undefined,
+        readyPages,
+      );
+      setMessage("页面证据已顺序上传；现在可请求云端解析。");
+      documents.reload();
+    } catch (e) {
+      setError(errorText(e));
+      documents.reload();
     } finally {
       setBusy(false);
     }
@@ -182,12 +233,12 @@ export default function DocumentsPage({
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="pdf">试卷 PDF（≤20MB）</Label>
+            <Label htmlFor="pdf">PDF（≤20MB）或图片（≤4MB）</Label>
             <Input
               className="min-h-11"
               id="pdf"
               type="file"
-              accept="application/pdf,.pdf"
+              accept="application/pdf,.pdf,image/jpeg,image/png,image/webp"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
           </div>
@@ -197,8 +248,32 @@ export default function DocumentsPage({
             onClick={() => void upload()}
           >
             <Upload />
-            上传 PDF
+            上传原文件
           </Button>
+          <Button
+            className="min-h-11"
+            variant="outline"
+            disabled={
+              busy ||
+              !file ||
+              !(
+                file.type === "application/pdf" || file.name.endsWith(".pdf")
+              ) ||
+              !id ||
+              (id !== preparedDocumentID &&
+                file.name !==
+                  documents.data?.items.find((d) => d.id === id)?.filename)
+            }
+            onClick={() => void prepare()}
+          >
+            本机逐页准备 PDF / 显式重试
+          </Button>
+          {pageProgress && (
+            <Feedback>
+              {pageProgress}。使用本地PDF.js
+              worker，逐页压缩后上传，不在服务器渲染PDF。
+            </Feedback>
+          )}
           <Separator />
           <div className="flex flex-wrap gap-2">
             <Select value={id} onValueChange={setID}>
@@ -249,11 +324,29 @@ export default function DocumentsPage({
                   rel="noreferrer"
                   className="underline"
                 >
-                  查看原始 PDF ↗
+                  查看原始文件 ↗
                 </a>
               </CardDescription>
             </CardHeader>
             <CardContent>
+              <p className="mb-3 text-xs text-muted-foreground">
+                已准备 {doc.prepared_pages ?? 0}/{doc.total_pages ?? 0} 页 ·
+                OCR完成 {doc.completed_pages ?? 0} 页
+                {doc.current_page ? " · 当前第" + doc.current_page + "页" : ""}
+              </p>
+              {!!doc.total_pages && (
+                <PageEvidence
+                  examID={exam.id}
+                  documentID={doc.id}
+                  refresh={doc.completed_pages ?? 0}
+                />
+              )}
+              {doc.page_errors?.map((p) => (
+                <Feedback error key={p.page_number}>
+                  第{p.page_number}页：{p.message}
+                  。不会自动重复推理，请显式重试解析。
+                </Feedback>
+              ))}
               {doc.artifact?.error && (
                 <Feedback error>{doc.artifact.error}</Feedback>
               )}
@@ -310,9 +403,11 @@ export default function DocumentsPage({
                         <summary className="text-sm cursor-pointer">
                           原始 OCR 文本
                         </summary>
-                        <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-xs pt-3">
-                          {doc.artifact.extraction.text}
-                        </pre>
+                        <Suspense
+                          fallback={<p>正在载入安全Markdown与数学渲染…</p>}
+                        >
+                          <SafeMarkdown text={doc.artifact.extraction.text} />
+                        </Suspense>
                       </details>
                     )}
                   </div>

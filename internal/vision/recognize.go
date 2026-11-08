@@ -17,7 +17,7 @@ import (
 // low-memory production/cloud recognition path. Do not run unlimited parallel
 // recognitions. Preflight encoded uploads with image.DecodeConfig before decode.
 func Recognize(img image.Image, m Manifest) (Recognition, error) {
-	r := Recognition{Answers: []Answer{}, Quality: Quality{Reasons: []string{}}}
+	r := Recognition{Answers: []Answer{}, IdentityState: "not_required", Quality: Quality{Reasons: []string{}}}
 	reject := func(err error, reason string) (Recognition, error) {
 		r.Quality.Reasons = append(r.Quality.Reasons, reason)
 		return r, err
@@ -36,9 +36,21 @@ func Recognize(img image.Image, m Manifest) (Recognition, error) {
 		return reject(ErrImageSize, "image_size")
 	}
 	g := grayImage(img)
-	corners, ok := findMarkers(g)
+	// Both the fixed student-number cards are half-A4 single cards: reject a whole
+	// uncut two-up sheet instead of mixing the two halves.
+	studentCard := m.Version == StudentVersion || m.Version == EnglishVersion
+	corners, ok := findCardMarkers(g, studentCard)
 	if !ok {
 		return reject(ErrMarkers, "markers_not_found")
+	}
+	if studentCard {
+		v2, err := recognizeStudent(g, m, corners)
+		v2.Quality.Width, v2.Quality.Height = w, h
+		if err != nil {
+			v2.Quality.Reasons = []string{"student_identity_or_quality_rejected"}
+			return v2, err
+		}
+		return v2, nil
 	}
 	var transform homography
 	found := false

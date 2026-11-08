@@ -41,6 +41,9 @@ func (a *App) Worker(ctx context.Context) error {
 		if job.Kind == "parse" {
 			timeout = 180 * time.Second
 		}
+		if job.Kind == "document_task" {
+			timeout = 310 * time.Second
+		}
 		jobCtx, cancel := context.WithTimeout(ctx, timeout)
 		var er error
 		if job.Attempts > 3 {
@@ -49,6 +52,8 @@ func (a *App) Worker(ctx context.Context) error {
 			switch job.Kind {
 			case "capture":
 				er = a.processCapture(jobCtx, job.EntityID, &job)
+			case "document_task":
+				er = a.processDocumentTask(jobCtx, job.EntityID, &job)
 			case "parse":
 				er = a.processDocument(jobCtx, job.EntityID, &job)
 			default:

@@ -19,7 +19,7 @@ export type ProviderSettings = {
   encryption_ready: boolean;
   storage_mode: string;
   warning?: string;
-  ocr: GatewaySettings;
+  ocr: GatewaySettings & { type?: "gateway" | "ollama"; model?: string };
   ai: {
     base_url: string;
     model: string;
@@ -29,7 +29,13 @@ export type ProviderSettings = {
   card: GatewaySettings;
 };
 export type ProviderDraft = {
-  ocr: { url: string; secret: string; clear_secret: boolean };
+  ocr: {
+    type: "gateway" | "ollama";
+    model: string;
+    url: string;
+    secret: string;
+    clear_secret: boolean;
+  };
   ai: {
     base_url: string;
     model: string;
@@ -52,7 +58,13 @@ export const providerNames: Record<ProviderKind, string> = {
 };
 export function draftFromSettings(settings: ProviderSettings): ProviderDraft {
   return {
-    ocr: { url: settings.ocr.url, secret: "", clear_secret: false },
+    ocr: {
+      type: settings.ocr.type ?? "gateway",
+      model: settings.ocr.model ?? "",
+      url: settings.ocr.url,
+      secret: "",
+      clear_secret: false,
+    },
     ai: {
       base_url: settings.ai.base_url,
       model: settings.ai.model,
@@ -73,7 +85,9 @@ function validateURL(label: string, value: string) {
   if (
     !["https:", "http:"].includes(url.protocol) ||
     url.username ||
-    url.password
+    url.password ||
+    url.search ||
+    url.hash
   ) {
     throw new Error(label + " URL 必须为 HTTP(S)，且不能内嵌凭据");
   }

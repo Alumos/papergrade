@@ -22,10 +22,20 @@ Cookie 登录、真实能力/内存模式提示；创建班级、CSV/TSV 文本�
 
 ## 连续相机
 
-getUserMedia 一次启动，视频只在 DOM；帧不存 React state。每650ms小尺寸 canvas 检查亮度、清晰度、黑色连通块四角、jsQR 个人token，连续三帧同token且稳定后才选帧JPEG（最长边1800，质量0.86）。这是轻量启发式取景门控，不是正式OMR。vision manifest为normalized a4-v1，QR raw opaque token。服务端/云端必须独立验证，不信任candidate token。
+getUserMedia 一次启动，视频只在 DOM；帧不存 React state。650ms 低频小尺寸 canvas 做质量/稳定门控，之后高分辨图像交真正的 OMR WebWorker：四角定位、四方向黑白参考、透视 homography、灰度覆盖采样、学号逐列十进制与客观题解码。a5-v2 半A4卡二维码全班相同，仅匹配试卷；学生唯一身份来自学号填涂，保留前导零。v2以学号+画面位移/冷却防换卡误拍；旧a4-v1仍按原二维码流程。浏览器结果只是预览，不上传分数；Go独立从JPEG复核，只有committed绿灯/音。全张双联页应拒绝，必须裁成一份210×148.5mm单卡。
 
-IndexedDB先存Blob和client_capture_id，最多3个未终结任务，单上传/轮询；Idempotency-Key与client_capture_id相同，网络错误保留原请求手动重试。已选token防止重复自动入队。仅committed绿灯；新committed且非deduplicated才发声，duplicate不计数。后台释放相机，前台用户继续；已保存任务恢复查询。暂停不撤销服务端已受理请求。JPEG图片上传可兜底，仍由服务端审核。
+IndexedDB先存Blob和client_capture_id，最多3个未终结任务，单上传/轮询；Idempotency-Key与client_capture_id相同，网络错误保留原请求手动重试。v2已选学号防止重复自动入队，不把共用试卷QR当学生锁。仅committed绿灯；新committed且非deduplicated才发声，duplicate不计数。后台释放相机，前台用户继续；已保存任务恢复查询。暂停不撤销服务端已受理请求。JPEG图片上传可兜底，仍由服务端审核。
 
 ## 真实限制
 
-固定A4卡试验；未实测真实手机、反光、折痕、复杂透视、Safari权限与音频、长期离线。低分辨率黑块会受背景文字干扰，jsQR失败不会盲拍，改用上传。不宣称任意卡准确率。云端识别需专用结构化供应商endpoint；未配不会假成功。OCR/AI解析不支持时可手工建卷。IndexedDB需浏览器支持，清站点数据会丢待处理图像；应控制共享设备访问。复核通过认证接口读取原始答卷；重评与采纳按钮以真实 capabilities 为准；未配置云端无法进行真实供应商识别验收，不虚构成功。
+固定A4双联a5-v2卡试验；未实测真实手机、反光、折痕、复杂透视、Safari权限与音频、长期离线。低分辨率取景黑块会受背景文字干扰；v2身份不确定不会自动绑定，图片上传可进入人工复核。不宣称任意卡准确率。v2 Go标准卡OMR无需Card网关；旧卡云识别仍需专用供应商，未配不假成功。OCR/AI解析不支持时可手工建卷。IndexedDB需浏览器支持，清站点数据会丢待处理图像；应控制共享设备访问。复核通过认证接口读取原始答卷；重评与采纳按钮以真实 capabilities 为准；未配置云端无法进行真实供应商识别验收，不虚构成功。
+
+## v0.2 文档与打印
+
+OCR设置支持Gateway/原生Ollama的type/model/base URL，原生密钥可空，不预置NAS/DDNS地址。公网Ollama建议HTTPS+鉴权；VPS无法直接访问家中私网，需VPN或反向代理。PDF.js及worker按需加载，PDF≤30页，顺序转最长边2048 JPEG≤4MB上传；GET pages恢复已准备页，重新选择原件会字节比对防混页，解析失败需显式重试，不盲目重复推理。逐页OCR文本及最终候选用react-markdown（skipHtml）+KaTeX（trust:false）显示，Ollama LaTeX分隔符规范化；外部图片不自动请求。
+
+打印根据真实print-sheet每两人一页A4，末页奇数下半空白，不缩小旧卡。可下载原SVG、浏览器打印/另存PDF，以及真正jsPDF生成的A4 PDF（将认证模板SVG在本机300dpi离屏渲染嵌入；不是截应用UI，避免默认PDF字体丢中文）。实际浏览器PDF.js回读验证210×297mm、中文与填涂区可见，下载PDF是栅格模板非矢量文字。
+
+## 验证边界
+
+本轮真实浏览器完成DDNS Ollama两页OCR（可选密钥为空）→本地HTTP OpenAI协议fixture候选→教师采纳并补标准答案→发布→同一release单卡SVG合成填号001/B→真实WebWorker与Go均识别→200 committed 2/2分。AI fixture不是付费真实模型；合成填涂不是手机拍摄，真实2B纸卡与手机质量仍需实物验收。测试包含前导零、选项、透视skew、空/多涂/缺位、共享QR不同学生与冷却门控。pnpm11.7.0 minimumReleaseAge1440维持，parse5稳定8.0.0 override，core-js install script显式拒绝。

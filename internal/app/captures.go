@@ -31,10 +31,11 @@ func (a *App) capabilities(ctx context.Context) map[string]any {
 	} else if a.localOMR() {
 		mode = "local_experimental"
 	}
-	return map[string]any{"ocr_configured": p["ocr_configured"], "ai_configured": p["ai_configured"], "card_recognition_configured": p["card_configured"], "recognition_mode": mode, "local_omr_enabled": a.localOMR(), "storage_mode": a.Store.Mode(), "regrade_available": true, "document_adopt_available": true, "max_capture_bytes": 4 << 20, "max_questions": 40, "score_units_per_point": 100, "provider_settings_available": e == nil, "provider_settings_configurable": a.providerCipher != nil}
+	return map[string]any{"ocr_configured": p["ocr_configured"], "ai_configured": p["ai_configured"], "card_recognition_configured": p["card_configured"], "recognition_mode": mode, "standard_card_recognition_mode": "omr", "standard_card_recognition_configured": true, "ocr_image_upload": true, "pdf_browser_pages": true, "local_omr_enabled": a.localOMR(), "storage_mode": a.Store.Mode(), "regrade_available": true, "document_adopt_available": true, "max_capture_bytes": 4 << 20, "max_questions": 40, "score_units_per_point": 100, "provider_settings_available": e == nil, "provider_settings_configurable": a.providerCipher != nil}
 }
 func publicCapture(c Capture) Capture { c.Path = ""; c.Hash = ""; c.Candidate = ""; return c }
 func (a *App) registerCaptures(m *http.ServeMux) {
+	a.registerIdentityReview(m)
 	m.HandleFunc("GET /api/v1/captures/{id}", func(w http.ResponseWriter, r *http.Request) {
 		var c Capture
 		e := a.Store.View(r.Context(), func(t *store.Tx) error { return t.Get("capture", r.PathValue("id"), &c) })
@@ -56,14 +57,21 @@ func (a *App) registerCaptures(m *http.ServeMux) {
 		}
 	})
 	m.HandleFunc("POST /api/v1/exams/{id}/captures", func(w http.ResponseWriter, r *http.Request) {
-		client, err := a.cloud(r.Context())
-		if err != nil {
-			fail(w, err)
+		var captureExam Exam
+		if e := a.Store.View(r.Context(), func(t *store.Tx) error { return t.Get("exam", r.PathValue("id"), &captureExam) }); e != nil {
+			fail(w, e)
 			return
 		}
-		if !client.Capabilities()["card_configured"] && !a.localOMR() {
-			fail(w, &APIError{503, "PROVIDER_NOT_CONFIGURED", "cloud card recognition is not configured; no capture accepted"})
-			return
+		if !isStudentCard(captureExam) {
+			client, err := a.cloud(r.Context())
+			if err != nil {
+				fail(w, err)
+				return
+			}
+			if !client.Capabilities()["card_configured"] && !a.localOMR() {
+				fail(w, &APIError{503, "PROVIDER_NOT_CONFIGURED", "cloud card recognition is not configured; no capture accepted"})
+				return
+			}
 		}
 		select {
 		case a.heavy <- struct{}{}:
@@ -154,7 +162,7 @@ func (a *App) registerCaptures(m *http.ServeMux) {
 			if pending >= 20 {
 				return &APIError{429, "QUEUE_FULL", "capture queue full"}
 			}
-			c = Capture{ID: ID(), ClientID: clientID, ExamID: ex.ID, Status: "queued", Hash: hash, Path: path, Candidate: r.FormValue("candidate_sheet_token"), CreatedAt: time.Now().UTC()}
+			c = Capture{ID: ID(), ClientID: clientID, ExamID: ex.ID, Status: "queued", Revision: 1, Hash: hash, Path: path, Candidate: r.FormValue("candidate_sheet_token"), CreatedAt: time.Now().UTC()}
 			if len(c.Candidate) > 512 {
 				return bad("candidate token too long")
 			}
@@ -191,41 +199,59 @@ func (a *App) registerCaptures(m *http.ServeMux) {
 		respond(w, status, publicCapture(c))
 	})
 }
-func (a *App) recognize(ctx context.Context, raw []byte, ex Exam) (string, []grading.Answer, error) {
-	out := []grading.Answer{}
-	client, err := a.cloud(ctx)
-	if err != nil {
-		return "", nil, err
-	}
-	if client.Capabilities()["card_configured"] {
-		qs := []provider.CardQuestion{}
-		for _, q := range ex.Questions {
-			qs = append(qs, provider.CardQuestion{ID: q.ID, Type: q.Type, Options: q.Options})
+
+type recognizedCard struct {
+	Token, StudentNumber, IdentityState string
+	Answers                             []grading.Answer
+}
+
+// isStudentCard reports whether a published release prints a fixed half-A4
+// student-number card. Both the legacy a5-v2 and the English a5-v3 are built-in
+// OMR cards and must never fall back to a paid cloud card provider.
+func isStudentCard(ex Exam) bool {
+	return ex.Template != nil && (ex.Template.Version == vision.StudentVersion || ex.Template.Version == vision.EnglishVersion)
+}
+func (a *App) recognize(ctx context.Context, raw []byte, ex Exam) (recognizedCard, error) {
+	out := recognizedCard{IdentityState: "not_required", Answers: []grading.Answer{}}
+	if !isStudentCard(ex) {
+		client, err := a.cloud(ctx)
+		if err != nil {
+			return out, err
 		}
-		rec, e := client.RecognizeCard(ctx, raw, ex.Template, qs)
-		if e != nil {
-			return "", nil, e
+		if client.Capabilities()["card_configured"] {
+			qs := []provider.CardQuestion{}
+			for _, q := range ex.Questions {
+				qs = append(qs, provider.CardQuestion{ID: q.ID, Type: q.Type, Options: q.Options})
+			}
+			rec, e := client.RecognizeCard(ctx, raw, ex.Template, qs)
+			if e != nil {
+				return out, e
+			}
+			out.Token = rec.Token
+			for _, q := range rec.Answers {
+				out.Answers = append(out.Answers, grading.Answer{QuestionID: q.QuestionID, Selected: q.Selected, State: q.State, Confidence: q.Confidence})
+			}
+			return out, nil
 		}
-		for _, q := range rec.Answers {
-			out = append(out, grading.Answer{QuestionID: q.QuestionID, Selected: q.Selected, State: q.State, Confidence: q.Confidence})
+		if !a.localOMR() {
+			return out, provider.ErrNotConfigured
 		}
-		return rec.Token, out, nil
-	}
-	if !a.localOMR() {
-		return "", nil, provider.ErrNotConfigured
 	}
 	img, _, e := image.Decode(bytes.NewReader(raw))
 	if e != nil {
-		return "", nil, e
+		return out, e
 	}
 	rec, e := vision.Recognize(img, *ex.Template)
 	if e != nil {
-		return "", nil, e
+		return out, e
 	}
+	out.Token = rec.Token
+	out.StudentNumber = rec.StudentNumber
+	out.IdentityState = rec.IdentityState
 	for _, q := range rec.Answers {
-		out = append(out, grading.Answer{QuestionID: q.QuestionID, Selected: q.Selected, State: q.State, Confidence: q.Confidence})
+		out.Answers = append(out.Answers, grading.Answer{QuestionID: q.QuestionID, Selected: q.Selected, State: q.State, Confidence: q.Confidence})
 	}
-	return rec.Token, out, nil
+	return out, nil
 }
 func (a *App) processCapture(ctx context.Context, id string, job *store.Job) error {
 	var c Capture
@@ -258,10 +284,9 @@ func (a *App) processCapture(ctx context.Context, id string, job *store.Job) err
 		return nil
 	}
 	raw, e := a.load(c.Path, 4<<20)
-	var token string
-	var answers []grading.Answer
+	var recognized recognizedCard
 	if e == nil {
-		token, answers, e = a.recognize(ctx, raw, ex)
+		recognized, e = a.recognize(ctx, raw, ex)
 	}
 	recognitionErr := e
 	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -287,7 +312,10 @@ func (a *App) processCapture(ctx context.Context, id string, job *store.Job) err
 				return conflict("capture release changed")
 			}
 			// Geometry is frozen, but answers may have an explicit newer grading version. Score under the current version inside this commit lock.
-			if e := a.commitRecognition(t, &c, current, token, answers); e != nil {
+			c.StudentNumber = recognized.StudentNumber
+			c.IdentityState = recognized.IdentityState
+			c.Answers = recognized.Answers
+			if e := a.commitRecognition(t, &c, current, recognized.Token, recognized.Answers); e != nil {
 				return e
 			}
 		}
@@ -301,6 +329,9 @@ func (a *App) processCapture(ctx context.Context, id string, job *store.Job) err
 	})
 }
 func (a *App) commitRecognition(t *store.Tx, c *Capture, ex Exam, token string, answers []grading.Answer) error {
+	if isStudentCard(ex) {
+		return a.commitStudentRecognition(t, c, ex, token, answers)
+	}
 	var sheet *Sheet
 	for i := range ex.Sheets {
 		if ex.Sheets[i].Token == token {

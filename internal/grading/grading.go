@@ -15,6 +15,7 @@ type Question struct {
 	ScoreUnits        int      `json:"score_units"`
 	PartialScoreUnits int      `json:"partial_score_units,omitempty"`
 	ReviewFlags       []string `json:"review_flags,omitempty"`
+	Section           string   `json:"section,omitempty"`
 }
 type Answer struct {
 	QuestionID string   `json:"question_id"`
@@ -39,8 +40,8 @@ func Equal(a, b []string) bool {
 	return true
 }
 func Validate(qs []Question, publish bool) error {
-	if len(qs) > 40 || (publish && len(qs) == 0) {
-		return fmt.Errorf("require 1–40 questions to publish")
+	if len(qs) > 60 || (publish && len(qs) == 0) {
+		return fmt.Errorf("require 1–60 questions to publish")
 	}
 	numbers := map[string]bool{}
 	ids := map[string]bool{}
@@ -53,8 +54,8 @@ func Validate(qs []Question, publish bool) error {
 		if q.Type != "single_choice" && q.Type != "multiple_choice" && q.Type != "true_false" {
 			return fmt.Errorf("unsupported question type")
 		}
-		if len(q.Options) < 2 || len(q.Options) > 5 || (q.Type == "true_false" && len(q.Options) != 2) {
-			return fmt.Errorf("require 2–5 distinct options (2 for true_false)")
+		if len(q.Options) < 2 || len(q.Options) > 7 || (q.Type == "true_false" && len(q.Options) != 2) {
+			return fmt.Errorf("require 2–7 distinct options (2 for true_false)")
 		}
 		options := map[string]bool{}
 		for _, v := range q.Options {

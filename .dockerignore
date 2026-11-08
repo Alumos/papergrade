@@ -10,6 +10,8 @@ data
 web/dist
 web/coverage
 web/*.png
+web/v02-*.pdf
+web/v02-ui-results.json
 __pycache__
 *.pyc
 bin

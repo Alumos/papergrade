@@ -22,6 +22,7 @@ export type Student = {
 export type Question = {
   id?: string;
   number: string;
+  section?: string;
   type: "single_choice" | "multiple_choice" | "true_false";
   options: string[];
   answer: string[];
@@ -41,6 +42,7 @@ export type Exam = {
   release_id?: string;
   created_at: string;
   student_count: number;
+  student_number_digits?: number;
   received_count: number;
   review_count: number;
 };
@@ -56,6 +58,8 @@ export type RecognizedAnswer = {
   state: string;
   confidence?: number;
 };
+export type IdentityState =
+  "recognized" | "blank" | "uncertain" | "invalid_multiple" | "not_required";
 export type CaptureStatus =
   | "queued"
   | "processing"
@@ -69,6 +73,9 @@ export type CaptureResult = {
   client_capture_id: string;
   status: CaptureStatus;
   student_display?: string;
+  student_number?: string;
+  identity_state?: IdentityState;
+  revision?: number;
   submission_id?: string;
   score_units?: number;
   max_score_units?: number;
@@ -108,6 +115,13 @@ export type DocumentItem = {
   message?: string;
   error?: string;
   created_at?: string;
+  content_type?: string;
+  total_pages?: number;
+  prepared_pages?: number;
+  completed_pages?: number;
+  current_page?: number;
+  progress?: number;
+  page_errors?: { page_number: number; message: string }[];
   artifact?: {
     error?: string;
     requires_teacher_confirmation?: boolean;
@@ -133,7 +147,31 @@ export type DocumentItem = {
     };
   };
 };
+export type GeometryBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 export type Manifest = {
+  student_number_digits?: number;
+  student_bubbles?: {
+    column: number;
+    digit: number;
+    x: number;
+    y: number;
+    r: number;
+  }[];
+  bubbles?: {
+    question_id: string;
+    option: string;
+    x: number;
+    y: number;
+    r: number;
+  }[];
+  questions?: { id: string; number: string; type: string; options: string[] }[];
+  black_reference?: GeometryBox;
+  white_reference?: GeometryBox;
   version: string;
   width_mm: number;
   height_mm: number;

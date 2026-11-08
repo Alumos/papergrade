@@ -5,6 +5,7 @@ import (
 	"github.com/papergrade/papergrade/internal/store"
 	"github.com/papergrade/papergrade/internal/vision"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -172,11 +173,7 @@ func (a *App) registerExams(m *http.ServeMux) {
 			}
 			qs := []vision.Question{}
 			for _, q := range e.Questions {
-				qs = append(qs, vision.Question{ID: q.ID, Number: q.Number, Type: q.Type, Options: q.Options})
-			}
-			manifest, err := vision.BuildManifest(qs)
-			if err != nil {
-				return bad(err.Error())
+				qs = append(qs, vision.Question{ID: q.ID, Number: q.Number, Type: q.Type, Options: q.Options, Section: q.Section})
 			}
 			students, err := list[Student](t, "student", e.ClassID)
 			if err != nil {
@@ -185,9 +182,58 @@ func (a *App) registerExams(m *http.ServeMux) {
 			if len(students) == 0 {
 				return bad("roster required before publish")
 			}
-			e.Sheets = []Sheet{}
+			// The English half-A4 card is selected explicitly by section labels, by
+			// the English subject, or by anything the older 40-question / five-option
+			// template physically cannot hold. Nothing is silently truncated.
+			english := strings.Contains(e.Subject, "英语") || len(e.Questions) > vision.MaxQuestions
+			for _, q := range e.Questions {
+				if q.Section != "" || len(q.Options) > 5 {
+					english = true
+				}
+			}
+			digits := len(students[0].Number)
+			if english {
+				if digits != 4 {
+					return bad("English release requires exactly 4 digits")
+				}
+				for _, s := range students {
+					if len(s.Number) != 4 {
+						return bad("English release requires exactly 4 numeric student-number digits")
+					}
+				}
+			}
+			if digits < 1 || digits > 12 {
+				return bad("student numbers must contain 1–12 digits of one uniform width")
+			}
 			for _, s := range students {
-				e.Sheets = append(e.Sheets, Sheet{s.ID, s.Number, s.Name, ID()})
+				if len(s.Number) != digits {
+					return bad("student number widths differ; correct roster before publishing (no padding)")
+				}
+				for _, ch := range s.Number {
+					if ch < '0' || ch > '9' {
+						return bad("numeric student numbers required for student-number cards")
+					}
+				}
+			}
+			var manifest vision.Manifest
+			var manifestErr error
+			if english {
+				eq := make([]vision.EnglishQuestion, len(qs))
+				for i, q := range qs {
+					eq[i] = vision.EnglishQuestion{Question: q}
+				}
+				manifest, manifestErr = vision.BuildEnglishManifest(eq)
+			} else {
+				manifest, manifestErr = vision.BuildStudentManifest(qs, digits)
+			}
+			if manifestErr != nil {
+				return bad(manifestErr.Error())
+			}
+			e.StudentNumberDigits = digits
+			e.Sheets = []Sheet{}
+			releaseToken := ID()
+			for _, s := range students {
+				e.Sheets = append(e.Sheets, Sheet{s.ID, s.Number, s.Name, releaseToken})
 			}
 			e.StudentCount = len(students)
 			e.Template = &manifest
@@ -261,5 +307,6 @@ func (a *App) registerExams(m *http.ServeMux) {
 		}
 		fail(w, store.ErrNotFound)
 	})
+	m.HandleFunc("GET /api/v1/exams/{id}/print-sheet", a.printSheet)
 	a.registerResults(m)
 }

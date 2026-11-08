@@ -45,7 +45,22 @@ export default function ScanPage({ exam }: { exam: Exam }) {
           0.88,
         ),
       );
-      await scan.enqueue(blob);
+      let preview;
+      try {
+        preview = await scan.inspectUpload(blob);
+      } catch (e) {
+        scan.setError(
+          "本机预览未通过：" + errorText(e) + "。仍可交服务端独立复核。",
+        );
+      }
+      await scan.enqueue(
+        blob,
+        undefined,
+        preview?.identity_state === "recognized"
+          ? "number:" + preview.student_number
+          : undefined,
+        preview,
+      );
     } catch (e) {
       scan.setError(errorText(e));
     }
@@ -53,6 +68,23 @@ export default function ScanPage({ exam }: { exam: Exam }) {
   return (
     <div className="space-y-5">
       {scan.error && <Feedback error>{scan.error}</Feedback>}
+      {scan.preview && (
+        <Feedback>
+          本机WebWorker预览（未入库）：学号{" "}
+          {scan.preview.student_number || "未确定"} · 身份{" "}
+          {scan.preview.identity_state} ·{" "}
+          {scan.preview.answers
+            .map(
+              (a) =>
+                (scan.manifest?.questions?.find((q) => q.id === a.question_id)
+                  ?.number ?? a.question_id) +
+                ":" +
+                (a.selected.join("/") || a.state),
+            )
+            .join("；")}
+          。仅服务端committed才成功。
+        </Feedback>
+      )}
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -61,7 +93,7 @@ export default function ScanPage({ exam }: { exam: Exam }) {
               <Badge variant="outline">本机确认 {scan.committed} 份</Badge>
             </div>
             <CardDescription>
-              稳定后自动选帧，更换个人二维码卡后继续。
+              稳定后自动选帧；新卡使用学号填涂+画面位移换卡，不使用全班相同二维码做身份锁。
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -207,6 +239,13 @@ export default function ScanPage({ exam }: { exam: Exam }) {
                       }
                     />
                   </div>
+                  {(job.result?.student_number ||
+                    job.result?.identity_state) && (
+                    <p className="text-sm text-muted-foreground">
+                      服务端学号 {job.result.student_number || "未绑定"} · 身份{" "}
+                      {job.result.identity_state}
+                    </p>
+                  )}
                   {job.result?.status === "committed" && (
                     <p className="text-sm font-medium text-green-700">
                       正式入库 · {score(job.result.score_units)} /{" "}
@@ -263,8 +302,7 @@ export default function ScanPage({ exam }: { exam: Exam }) {
         </Card>
       </div>
       <Feedback>
-        固定 A4 卡试验版。真实手机、反光折痕和复杂透视尚需实测；相机须 HTTPS
-        或本机 localhost。云端未配置会真实报错，请用图片上传兜底或联系管理员。
+        固定A4双联卡试验版，沿中线裁切后只拍一张半A4卡。v2默认服务端学号OMR，不依赖云端Card网关；旧卡仍按旧能力。真实手机2B、反光折痕和复杂透视尚需实测，相机须HTTPS或本机localhost。
       </Feedback>
     </div>
   );

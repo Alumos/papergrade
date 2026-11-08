@@ -1,5 +1,7 @@
 # Fixed A4 vision PoC
 
+V0.2 adds a5-v2 student-number half-A4 cards; see [V02 geometry](V02_GEOMETRY.md). The sections below describe legacy a4-v1 behavior and its original opt-in cloud rollout. V2 deterministic OMR is the new default, bounded by backend single-worker admission; it does not require a card gateway. V2 QR is optional shared release metadata, never student identity.
+
 This package is intentionally scoped to one standard card, not arbitrary old
 cards. **Synthetic tests are not real-phone acceptance.** No trained model,
 OpenCV, GPU stack, subprocess, PDF renderer, network service, or background

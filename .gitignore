@@ -13,6 +13,8 @@ web/dist/
 web/coverage/
 # Local browser validation captures (kept locally, not shipped as source)
 web/*.png
+web/v02-*.pdf
+web/v02-ui-results.json
 __pycache__/
 *.pyc
 coverage.out

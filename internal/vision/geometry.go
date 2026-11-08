@@ -74,7 +74,9 @@ func sample(g *image.Gray, p Point) float64 {
 
 // Connected dark components distinguish filled square fiducials from bubble
 // rings and QR finder patterns. Only dense approximately-square blobs qualify.
-func findMarkers(g *image.Gray) ([]Point, bool) {
+func findMarkers(g *image.Gray) ([]Point, bool) { return findCardMarkers(g, false) }
+
+func findCardMarkers(g *image.Gray, strictSingle bool) ([]Point, bool) {
 	w, h := g.Rect.Dx(), g.Rect.Dy()
 	seen := make([]bool, w*h)
 	candidates := []Point{}
@@ -175,6 +177,21 @@ func findMarkers(g *image.Gray) ([]Point, bool) {
 	}
 	if area/2 < float64(w*h)*.22 {
 		return nil, false
+	}
+	if strictSingle {
+		// These cards are half A4 (210 x 148.5mm), so their width/height ratio is
+		// about 1.414. An uncut two-up sheet is 210 x 297mm, about 0.707. Checking
+		// the physical ratio rejects a full sheet whatever other blobs are present
+		// (filled cells are dense enough to look marker-sized on their own).
+		width := (math.Hypot(out[0].X-out[1].X, out[0].Y-out[1].Y) + math.Hypot(out[3].X-out[2].X, out[3].Y-out[2].Y)) / 2
+		height := (math.Hypot(out[0].X-out[3].X, out[0].Y-out[3].Y) + math.Hypot(out[1].X-out[2].X, out[1].Y-out[2].Y)) / 2
+		if height <= 0 {
+			return nil, false
+		}
+		shape := width / height
+		if shape < 1.15 || shape > 1.78 {
+			return nil, false
+		}
 	}
 	return out, true
 }

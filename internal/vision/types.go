@@ -5,9 +5,10 @@ package vision
 import "errors"
 
 const (
-	Version      = "a4-v1"
-	MaxQuestions = 40
-	MaxPixels    = 8_000_000
+	Version        = "a4-v1"
+	StudentVersion = "a5-v2"
+	MaxQuestions   = 40
+	MaxPixels      = 8_000_000
 )
 
 var (
@@ -23,6 +24,9 @@ type Question struct {
 	Number  string   `json:"number"`
 	Type    string   `json:"type"`
 	Options []string `json:"options"`
+	// Section is an optional printed group heading (for example "Reading").
+	// It is presentational only and never identifies a student.
+	Section string `json:"section,omitempty"`
 }
 
 type Point struct {
@@ -43,21 +47,36 @@ type Bubble struct {
 	R          float64 `json:"r"`
 }
 
+type DigitBubble struct {
+	Column int     `json:"column"`
+	Digit  int     `json:"digit"`
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	R      float64 `json:"r"`
+}
+
+type PrintCard struct {
+	StudentLabel string
+	Token        string
+}
+
 // Geometry is normalized to page width and height independently. R and
 // MarkerSize are fractions of page WIDTH, so a physical circle remains round.
 // Markers are centers in clockwise order: TL, TR, BR, BL.
 type Manifest struct {
-	Version         string     `json:"version"`
-	CoordinateSpace string     `json:"coordinate_space"`
-	WidthMM         float64    `json:"width_mm"`
-	HeightMM        float64    `json:"height_mm"`
-	MarkerSize      float64    `json:"marker_size"`
-	Markers         []Point    `json:"markers"`
-	QRBox           Box        `json:"qr_box"`
-	BlackReference  Box        `json:"black_reference"`
-	WhiteReference  Box        `json:"white_reference"`
-	Questions       []Question `json:"questions"`
-	Bubbles         []Bubble   `json:"bubbles"`
+	StudentNumberDigits int           `json:"student_number_digits,omitempty"`
+	StudentBubbles      []DigitBubble `json:"student_bubbles,omitempty"`
+	Version             string        `json:"version"`
+	CoordinateSpace     string        `json:"coordinate_space"`
+	WidthMM             float64       `json:"width_mm"`
+	HeightMM            float64       `json:"height_mm"`
+	MarkerSize          float64       `json:"marker_size"`
+	Markers             []Point       `json:"markers"`
+	QRBox               Box           `json:"qr_box"`
+	BlackReference      Box           `json:"black_reference"`
+	WhiteReference      Box           `json:"white_reference"`
+	Questions           []Question    `json:"questions"`
+	Bubbles             []Bubble      `json:"bubbles"`
 }
 
 type Answer struct {
@@ -76,7 +95,9 @@ type Quality struct {
 	Reasons   []string `json:"reasons"`
 }
 type Recognition struct {
-	Token   string   `json:"token"`
-	Answers []Answer `json:"answers"`
-	Quality Quality  `json:"quality"`
+	StudentNumber string   `json:"student_number"`
+	IdentityState string   `json:"identity_state"`
+	Token         string   `json:"token"`
+	Answers       []Answer `json:"answers"`
+	Quality       Quality  `json:"quality"`
 }

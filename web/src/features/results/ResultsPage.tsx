@@ -1,4 +1,5 @@
 import { useState } from "react";
+import UnboundReview from "./UnboundReview";
 import RegradeDialog from "./RegradeDialog";
 import { Download, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -92,6 +93,15 @@ export default function ResultsPage({
     items = tab === "review" ? reviews.data?.items : results.data?.items;
   return (
     <div className="space-y-5">
+      {!!exam.student_number_digits && (
+        <UnboundReview
+          exam={exam}
+          onBound={() => {
+            results.reload();
+            reviews.reload();
+          }}
+        />
+      )}
       <p className="text-xs text-muted-foreground">
         考试 revision {exam.revision} · 当前评分版本{" "}
         {exam.grading_version?.slice(0, 12) ?? "原始发布答案"} ·

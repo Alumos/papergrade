@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"github.com/papergrade/papergrade/internal/provider"
 	"github.com/papergrade/papergrade/internal/store"
 	"net/http"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 func publicDocument(d Document) Document { d.StoragePath = ""; d.Path = ""; return d }
 func (a *App) registerDocuments(m *http.ServeMux) {
+	a.registerDocumentPages(m)
 	m.HandleFunc("POST /api/v1/exams/{id}/documents", func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case a.heavy <- struct{}{}:
@@ -23,11 +25,15 @@ func (a *App) registerDocuments(m *http.ServeMux) {
 			fail(w, e)
 			return
 		}
+		contentType := "application/pdf"
 		if !bytes.HasPrefix(raw, []byte("%PDF-")) {
-			fail(w, bad("PDF signature required"))
-			return
+			contentType, e = provider.ImageType(raw)
+			if e != nil {
+				fail(w, bad(e.Error()))
+				return
+			}
 		}
-		d := Document{ID: ID(), ExamID: r.PathValue("id"), Filename: name, Status: "uploaded", Size: len(raw), CreatedAt: time.Now().UTC()}
+		d := Document{ID: ID(), ExamID: r.PathValue("id"), Filename: name, Status: "uploaded", ContentType: contentType, PageErrors: []PageError{}, Size: len(raw), CreatedAt: time.Now().UTC()}
 		key, e := a.save(raw)
 		if e != nil {
 			fail(w, e)
@@ -81,22 +87,16 @@ func (a *App) registerDocuments(m *http.ServeMux) {
 			fail(w, e)
 			return
 		}
-		w.Header().Set("Content-Disposition", "inline; filename=paper.pdf")
+		w.Header().Set("Content-Disposition", "inline")
+		if d.ContentType == "" {
+			d.ContentType = "application/pdf"
+		}
 		w.Header().Set("Content-Security-Policy", "sandbox")
-		if e = a.serveFile(w, r, d.StoragePath, 20<<20, "application/pdf"); e != nil {
+		if e = a.serveFile(w, r, d.StoragePath, 20<<20, d.ContentType); e != nil {
 			fail(w, e)
 		}
 	})
 	m.HandleFunc("POST /api/v1/exams/{id}/parse", func(w http.ResponseWriter, r *http.Request) {
-		if a.Store.Mode() == "memory_dev" {
-			select {
-			case a.heavy <- struct{}{}:
-				defer func() { <-a.heavy }()
-			default:
-				fail(w, &APIError{429, "BUSY", "one processing request at a time"})
-				return
-			}
-		}
 		client, err := a.cloud(r.Context())
 		if err != nil {
 			fail(w, err)
@@ -115,6 +115,13 @@ func (a *App) registerDocuments(m *http.ServeMux) {
 			return
 		}
 		var d Document
+		taskID := ""
+		legacyOCRSlot := false
+		defer func() {
+			if legacyOCRSlot {
+				<-a.ocrSlot
+			}
+		}()
 		e := a.Store.With(r.Context(), func(t *store.Tx) error {
 			var ex Exam
 			if e := t.Get("exam", r.PathValue("id"), &ex); e != nil {
@@ -135,8 +142,21 @@ func (a *App) registerDocuments(m *http.ServeMux) {
 			if d.ID == "" {
 				return store.ErrNotFound
 			}
+			if client.OCRKind() == "ollama" || (d.ContentType != "" && d.ContentType != "application/pdf") || d.PreparedPages > 0 {
+				var e error
+				taskID, e = a.queueDocumentParse(t, &d, client.OCRKind())
+				return e
+			}
 			if d.Status == "queued" || d.Status == "processing" {
 				return conflict("document already queued")
+			}
+			if a.Store.Mode() == "memory_dev" {
+				select {
+				case a.ocrSlot <- struct{}{}:
+					legacyOCRSlot = true
+				default:
+					return &APIError{429, "OCR_BUSY", "one OCR/AI task at a time"}
+				}
 			}
 			d.Status = "queued"
 			if e = t.Put("document", d.ID, d.ExamID, "", d); e != nil {
@@ -146,6 +166,13 @@ func (a *App) registerDocuments(m *http.ServeMux) {
 		})
 		if e != nil {
 			fail(w, e)
+			return
+		}
+		if taskID != "" {
+			if a.Store.Mode() == "memory_dev" {
+				a.runMemoryDocumentTask(taskID)
+			}
+			respond(w, 202, publicDocument(d))
 			return
 		}
 		if a.Store.Mode() == "memory_dev" {

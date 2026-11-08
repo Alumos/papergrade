@@ -1,3 +1,6 @@
+// LEGACY v0.1 script retained as historical reference; new releases MUST run
+// scripts/v02-e2e.mjs (compiled card-fixture and db-sandbox required).
+// This old fixture does not create valid a5-v2 student-number evidence.
 // Disposable integration test only. Starts isolated API+Worker and a controlled
 // protocol fixture cloud, exercising the real PostgreSQL queue and persistence.
 import assert from 'node:assert/strict';

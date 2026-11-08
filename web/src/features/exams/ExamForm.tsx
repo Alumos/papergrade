@@ -52,6 +52,23 @@ export default function ExamForm({
     setQuestions((qs) =>
       qs.map((q, i) => (i === index ? { ...q, ...patch } : q)),
     );
+  // Option letters are A..G so English "choose five of seven" items fit. The
+  // answers that no longer exist are dropped instead of silently kept.
+  const setOptionCount = (index: number, count: number) => {
+    const options = "ABCDEFG".slice(0, count).split("");
+    setQuestions((qs) =>
+      qs.map((q, i) =>
+        i === index
+          ? {
+              ...q,
+              type: q.type === "true_false" ? "single_choice" : q.type,
+              options,
+              answer: q.answer.filter((a) => options.includes(a)),
+            }
+          : q,
+      ),
+    );
+  };
   const save = async (publish = false) => {
     setBusy(true);
     setError("");
@@ -241,6 +258,35 @@ export default function ExamForm({
                     <Trash2 />
                   </Button>
                 </div>
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <div className="space-y-2">
+                    <Label htmlFor={"section-" + i}>题组（可选，会印在答题卡上）</Label>
+                    <Input
+                      className="min-h-11"
+                      id={"section-" + i}
+                      value={q.section ?? ""}
+                      placeholder="例：第一部分 听力（1–20）"
+                      onChange={(e) => change(i, { section: e.target.value })}
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2">
+                    {[
+                      { label: "ABC", count: 3 },
+                      { label: "ABCD", count: 4 },
+                      { label: "A–G 七选五", count: 7 },
+                    ].map((preset) => (
+                      <Button
+                        key={preset.label}
+                        type="button"
+                        variant="outline"
+                        className="min-h-11"
+                        onClick={() => setOptionCount(i, preset.count)}
+                      >
+                        {preset.label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
                 <div className="flex flex-wrap items-center gap-4">
                   <Label>正确答案</Label>
                   {q.options.map((option) => (
@@ -268,10 +314,9 @@ export default function ExamForm({
                     <Select
                       value={String(q.options.length)}
                       onValueChange={(v) => {
-                        const options = ["A", "B", "C", "D", "E"].slice(
-                          0,
-                          Number(v),
-                        );
+                        const options = "ABCDEFG"
+                          .slice(0, Number(v))
+                          .split("");
                         change(i, {
                           options,
                           answer: q.answer.filter((a) => options.includes(a)),
@@ -285,7 +330,7 @@ export default function ExamForm({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {[2, 3, 4, 5].map((n) => (
+                        {[2, 3, 4, 5, 6, 7].map((n) => (
                           <SelectItem key={n} value={String(n)}>
                             {n} 个选项
                           </SelectItem>
@@ -322,7 +367,7 @@ export default function ExamForm({
           <Button
             className="min-h-11"
             variant="outline"
-            disabled={questions.length >= 40}
+            disabled={questions.length >= 60}
             onClick={() =>
               setQuestions((qs) => [
                 ...qs,
@@ -338,6 +383,42 @@ export default function ExamForm({
           >
             <Plus />
             添加题目
+          </Button>
+          <Button
+            className="min-h-11"
+            variant="outline"
+            onClick={() => {
+              // Standard English paper: 20 three-option listening items, 15
+              // four-option reading items, one A-G seven-option group and 20
+              // four-option language-use items. Answers stay empty on purpose.
+              const make = (
+                count: number,
+                options: string[],
+                section: string,
+                start: number,
+              ) =>
+                Array.from({ length: count }, (_, i) => ({
+                  number: String(start + i),
+                  type: "single_choice" as const,
+                  section,
+                  options,
+                  answer: [] as string[],
+                  score_units: 200,
+                }));
+              setQuestions([
+                ...make(20, ["A", "B", "C"], "第一部分 听力（1–20）", 1),
+                ...make(15, ["A", "B", "C", "D"], "第二部分 阅读理解（21–35）", 21),
+                ...make(
+                  5,
+                  ["A", "B", "C", "D", "E", "F", "G"],
+                  "第三部分 七选五（36–40）",
+                  36,
+                ),
+                ...make(20, ["A", "B", "C", "D"], "第四部分 英语知识运用（41–60）", 41),
+              ]);
+            }}
+          >
+            英语60题模板
           </Button>
         </CardFooter>
       </Card>

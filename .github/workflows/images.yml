@@ -41,10 +41,12 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile && pnpm run test && pnpm run build
         working-directory: web
-      - name: Test PostgreSQL API and Worker persistence
+      - name: Test OCR to two-up student OMR with PostgreSQL
         run: |
           go build -trimpath -o /tmp/papergrade-e2e ./cmd/papergrade
-          PAPERGRADE_BINARY=/tmp/papergrade-e2e node scripts/postgres-e2e.mjs
+          go build -trimpath -o /tmp/papergrade-card-fixture ./scripts/card-fixture
+          go build -trimpath -o /tmp/papergrade-db-sandbox ./scripts/db-sandbox
+          PAPERGRADE_BINARY=/tmp/papergrade-e2e CARD_FIXTURE_BINARY=/tmp/papergrade-card-fixture DB_SANDBOX_BINARY=/tmp/papergrade-db-sandbox node scripts/v02-e2e.mjs
       - name: Normalize registry image name
         id: names
         env:

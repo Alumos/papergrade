@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"github.com/papergrade/papergrade/internal/grading"
 	"github.com/papergrade/papergrade/internal/store"
+	"github.com/papergrade/papergrade/internal/vision"
 	"image"
 	"image/color"
 	"image/png"
@@ -74,7 +75,39 @@ func (h *harness) login() {
 		h.t.Fatal("unsafe cookie")
 	}
 }
+
+// legacy fixture deliberately exercises existing a4-v1 releases after v2 becomes the default.
 func (h *harness) exam() Exam {
+	ex := h.studentExam()
+	var legacy Exam
+	if e := h.a.Store.With(context.Background(), func(tx *store.Tx) error {
+		if e := tx.Get("exam", ex.ID, &legacy); e != nil {
+			return e
+		}
+		qs := []vision.Question{}
+		for _, q := range legacy.Questions {
+			qs = append(qs, vision.Question{ID: q.ID, Number: q.Number, Type: q.Type, Options: q.Options})
+		}
+		m, e := vision.BuildManifest(qs)
+		if e != nil {
+			return e
+		}
+		legacy.Template = &m
+		legacy.StudentNumberDigits = 0
+		for i := range legacy.Sheets {
+			legacy.Sheets[i].Token = ID()
+		}
+		if e = tx.Put("release", legacy.ReleaseID, legacy.ID, "", legacy); e != nil {
+			return e
+		}
+		return tx.Put("exam", legacy.ID, "", "", legacy)
+	}); e != nil {
+		h.t.Fatal(e)
+	}
+	legacy.Sheets = nil
+	return legacy
+}
+func (h *harness) studentExam() Exam {
 	h.login()
 	c := parse[Class](h.t, h.request("POST", "/api/v1/classes", map[string]string{"name": "Class"}, 201))
 	h.request("POST", "/api/v1/classes/"+c.ID+"/students", map[string]any{"students": []map[string]string{{"number": "001", "name": "=student"}}}, 201)

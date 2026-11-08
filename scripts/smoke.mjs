@@ -17,7 +17,7 @@ const roster=await req('/api/v1/classes/'+cls.id+'/students');assert.equal(roste
 const exam=await req('/api/v1/exams','POST',{title:'Smoke objective exam',subject:'test',class_id:cls.id,questions:[{number:'1',type:'single_choice',options:['A','B','C','D'],answer:['B'],score_units:200}]});
 const published=await req('/api/v1/exams/'+exam.id+'/publish','POST',{revision:exam.revision});
 assert.equal(published.status,'published');
-const manifest=await req('/api/v1/exams/'+exam.id+'/template');assert.equal(manifest.version,'a4-v1');
+const manifest=await req('/api/v1/exams/'+exam.id+'/template');assert.equal(manifest.version,'a5-v2');assert.equal(manifest.student_number_digits,4);
 const sheets=await req('/api/v1/exams/'+exam.id+'/sheets');assert.equal(sheets.items.length,1);
 const card=await req('/api/v1/exams/'+exam.id+'/cards?student_id='+roster.items[0].id);assert(card.includes('<svg'));
 const results=await req('/api/v1/exams/'+exam.id+'/results');assert.equal(results.summary.expected,1);assert.equal(results.summary.received,0);

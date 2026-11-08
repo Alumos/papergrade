@@ -3,6 +3,8 @@ export type ScanJob = {
     id: string;
     examID: string;
     token?: string;
+    trackingKey?: string;
+    preview?: import("./omr").OMRPreview;
     blob: Blob;
     createdAt: number;
     captureID?: string;

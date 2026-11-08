@@ -18,6 +18,8 @@ type Capabilities = {
   storage_mode: string;
   recognition_mode: string;
   card_recognition_configured: boolean;
+  standard_card_recognition_configured?:boolean;
+  standard_card_recognition_mode?:string;
   ocr_configured: boolean;
   ai_configured: boolean;
 };
@@ -206,12 +208,15 @@ function CapabilitiesBanner({ mode }: { mode: string }) {
       {caps.error && <Feedback error>无法确认服务能力：{caps.error}</Feedback>}
       {caps.data && (
         <div className="flex flex-wrap gap-2">
+          {caps.data.standard_card_recognition_configured&&<Badge variant="secondary">标准双联卡：学号OMR / Go复核就绪</Badge>}
           <Badge variant="secondary">
             {caps.data.recognition_mode === "local_experimental"
               ? "本地实验识别"
-              : caps.data.card_recognition_configured
-                ? "云端识别已配置"
-                : "云端识别未配置"}
+              : caps.data.recognition_mode === "omr"
+                ? "标准卡学号OMR（服务端复核）"
+                : caps.data.card_recognition_configured
+                  ? "云端识别已配置"
+                  : "云端识别未配置"}
           </Badge>
           <Badge variant="outline">
             OCR {caps.data.ocr_configured ? "已配置" : "未配置"}

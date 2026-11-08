@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorText } from "@/api";
+import { OMRWorkerClient } from "@/scan/omrClient";
+import { NumberTracker } from "@/scan/tracking";
+import type { OMRPreview } from "@/scan/omr";
 import { terminal } from "@/lib";
 import type { CaptureResult, Exam, Manifest } from "@/types";
 import { analyzeFrame, StabilityGate } from "@/scan/quality";
@@ -18,7 +21,9 @@ export function useScanController(exam: Exam) {
     ready = useRef(false),
     soundRef = useRef(true),
     pauseRef = useRef(false),
-    enqueueBusy = useRef(false);
+    enqueueBusy = useRef(false),
+    omr = useRef<OMRWorkerClient | null>(null),
+    numberTracker = useRef(new NumberTracker());
   const [jobs, setJobs] = useState<ScanJob[]>([]),
     [running, setRunning] = useState(false),
     [hint, setHint] = useState(
@@ -29,7 +34,8 @@ export function useScanController(exam: Exam) {
     [active, setActive] = useState(""),
     [paused, setPaused] = useState(false),
     [manifest, setManifest] = useState<Manifest | null>(null),
-    [starting, setStarting] = useState(false);
+    [starting, setStarting] = useState(false),
+    [preview, setPreview] = useState<OMRPreview | null>(null);
   const sync = useCallback((next: ScanJob[]) => {
     jobsRef.current = next;
     if (mounted.current) setJobs([...next]);
@@ -48,7 +54,11 @@ export function useScanController(exam: Exam) {
         if (!mounted.current) return;
         sync(items);
         gate.current = new StabilityGate(
-          items.flatMap((j) => (j.token && !j.allowRescan ? [j.token] : [])),
+          items.flatMap((j) =>
+            !j.allowRescan && (j.trackingKey || j.token)
+              ? [j.trackingKey || j.token!]
+              : [],
+          ),
         );
         ready.current = true;
       })
@@ -68,6 +78,8 @@ export function useScanController(exam: Exam) {
       document.removeEventListener("visibilitychange", hidden);
       stream.current?.getTracks().forEach((t) => t.stop());
       runningRef.current = false;
+      omr.current?.close();
+      omr.current = null;
     };
   }, [exam.id, stop, sync]);
   const update = useCallback(
@@ -169,7 +181,12 @@ export function useScanController(exam: Exam) {
     };
   }, [exam.id, paused, update, chime]);
   const enqueue = useCallback(
-    async (blob: Blob, token?: string) => {
+    async (
+      blob: Blob,
+      token?: string,
+      trackingKey?: string,
+      localPreview?: OMRPreview,
+    ) => {
       if (enqueueBusy.current) throw new Error("正在保存上一帧，请稍后再试");
       enqueueBusy.current = true;
       try {
@@ -185,11 +202,13 @@ export function useScanController(exam: Exam) {
           id: crypto.randomUUID(),
           examID: exam.id,
           token,
+          trackingKey,
+          preview: localPreview,
           blob,
           createdAt: Date.now(),
         };
         await saveJob(job);
-        if (token) gate.current.reserve(token);
+        if (trackingKey || token) gate.current.reserve(trackingKey || token!);
         sync([...jobsRef.current, job]);
       } finally {
         enqueueBusy.current = false;
@@ -260,16 +279,25 @@ export function useScanController(exam: Exam) {
         canvas.height = Math.round((480 * v.videoHeight) / v.videoWidth);
         const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
         ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+        const v2 =
+          manifest?.version === "a5-v2" || manifest?.version === "a5-v3";
         const frame = analyzeFrame(
           ctx.getImageData(0, 0, canvas.width, canvas.height),
+          !v2,
         );
-        const accept = gate.current.inspect(frame);
+        const trackingKey = v2 ? "v2-framing-only" : frame.token;
+        const gatedFrame = { ...frame, trackingKey };
+        numberTracker.current.observe(frame.ready ? frame.corners : undefined);
+        const accept =
+          gate.current.inspect(gatedFrame) &&
+          (!v2 || numberTracker.current.canInspect());
         setHint(
-          frame.token && gate.current.has(frame.token)
+          (gatedFrame.trackingKey || gatedFrame.token) &&
+            gate.current.has(gatedFrame.trackingKey || gatedFrame.token!)
             ? "当前卡已选帧，请换下一张个人卡（不会重复计数）"
             : frame.message,
         );
-        if (accept && frame.token) {
+        if (accept && (gatedFrame.trackingKey || gatedFrame.token)) {
           saving.current = true;
           try {
             const output = document.createElement("canvas");
@@ -282,6 +310,35 @@ export function useScanController(exam: Exam) {
             output
               .getContext("2d")!
               .drawImage(v, 0, 0, output.width, output.height);
+            let localPreview: OMRPreview | undefined;
+            if (v2 && manifest) {
+              omr.current ??= new OMRWorkerClient();
+              try {
+                localPreview = await omr.current.recognize(
+                  output
+                    .getContext("2d")!
+                    .getImageData(0, 0, output.width, output.height),
+                  manifest,
+                );
+                setPreview(localPreview);
+              } catch (e) {
+                setHint(errorText(e));
+                return;
+              }
+              if (localPreview.identity_state !== "recognized") {
+                setHint("学号未确定，请修正填涂或用图片上传进入人工复核");
+                return;
+              }
+              const key = "number:" + localPreview.student_number;
+              if (gate.current.has(key)) {
+                setHint(
+                  "学号 " +
+                    localPreview.student_number +
+                    " 已选帧，请移走并换下一张不同学号卡",
+                );
+                return;
+              }
+            }
             const blob = await new Promise<Blob>((resolve, reject) =>
               output.toBlob(
                 (b) => (b ? resolve(b) : reject(new Error("JPEG 编码失败"))),
@@ -290,8 +347,15 @@ export function useScanController(exam: Exam) {
               ),
             );
             if (!cancelled) {
-              await enqueue(blob, frame.token);
-              setHint("已选取清晰帧，正在上传；请换下一张个人卡");
+              await enqueue(
+                blob,
+                v2 ? undefined : frame.token,
+                v2 ? "number:" + localPreview!.student_number : frame.token,
+                localPreview,
+              );
+              if (v2 && localPreview)
+                numberTracker.current.captured(localPreview.corners);
+              setHint("已选取清晰帧，正在上传；请移走并换下一张学号不同的卡");
             }
           } finally {
             saving.current = false;
@@ -308,7 +372,7 @@ export function useScanController(exam: Exam) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [running, enqueue]);
+  }, [running, enqueue, manifest]);
   const retry = async (job: ScanJob) => {
     try {
       await update({ ...job, error: undefined });
@@ -319,7 +383,9 @@ export function useScanController(exam: Exam) {
   const allowRescan = async (job: ScanJob) => {
     try {
       await update({ ...job, allowRescan: true });
-      if (job.token) gate.current.release(job.token);
+      if (job.trackingKey || job.token)
+        gate.current.release(job.trackingKey || job.token!);
+      numberTracker.current.rearm();
       setHint("已允许此识别失败卡重新选帧，请保持清晰稳定");
     } catch (e) {
       setError(errorText(e));
@@ -338,7 +404,8 @@ export function useScanController(exam: Exam) {
       return;
     try {
       await deleteJob(job.id);
-      if (job.token) gate.current.release(job.token);
+      if (job.trackingKey || job.token)
+        gate.current.release(job.trackingKey || job.token!);
       sync(jobsRef.current.filter((j) => j.id !== job.id));
     } catch (e) {
       setError(errorText(e));
@@ -350,6 +417,27 @@ export function useScanController(exam: Exam) {
 
   return {
     video,
+    preview,
+    manifest,
+    async inspectUpload(blob: Blob) {
+      if (manifest?.version !== "a5-v2" && manifest?.version !== "a5-v3")
+        return undefined;
+      const bitmap = await createImageBitmap(blob);
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      omr.current ??= new OMRWorkerClient();
+      const result = await omr.current.recognize(
+        canvas
+          .getContext("2d")!
+          .getImageData(0, 0, canvas.width, canvas.height),
+        manifest,
+      );
+      setPreview(result);
+      return result;
+    },
     jobs,
     running,
     hint,

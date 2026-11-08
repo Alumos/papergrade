@@ -2,7 +2,9 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -61,4 +63,53 @@ func TestRejectOversizedModelInput(t *testing.T) {
 	if _, e := c.Analyze(context.Background(), strings.Repeat("x", maxText+1)); e == nil {
 		t.Fatal("unbounded input")
 	}
+}
+
+// Real OpenAI-compatible models often send bare numbers for `number` and add a
+// section label. Both must be accepted, and an English paper may exceed 40
+// questions while the printed card still refuses over-capacity layouts.
+func TestAnalyzeAcceptsNumericNumberAndSection(t *testing.T) {
+	var payload strings.Builder
+	payload.WriteString(`{"questions":[`)
+	for i := 1; i <= 60; i++ {
+		if i > 1 {
+			payload.WriteString(",")
+		}
+		options := `["A","B","C","D"]`
+		section := "Reading"
+		if i <= 20 {
+			options = `["A","B","C"]`
+			section = "Listening"
+		}
+		if i >= 36 && i <= 40 {
+			options = `["A","B","C","D","E","F","G"]`
+			section = "Seven"
+		}
+		fmt.Fprintf(&payload, `{"number":%d,"type":"single_choice","options":%s,"answer":[],"score_units":null,"source_page":null,"review_flags":[],"section":"%s"}`, i, options, section)
+	}
+	payload.WriteString(`],"warnings":[]}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":%s}}],"usage":{"prompt_tokens":5,"completion_tokens":7}}`, jsonString(payload.String()))
+	}))
+	defer server.Close()
+	ry := New(Config{AIBaseURL: server.URL, AIKey: "k", AIModel: "m"})
+	a, err := ry.Analyze(context.Background(), "english paper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Questions) != 60 {
+		t.Fatalf("questions %d", len(a.Questions))
+	}
+	if a.Questions[0].Number != "1" || a.Questions[0].Section != "Listening" || len(a.Questions[0].Options) != 3 {
+		t.Fatalf("first question %+v", a.Questions[0])
+	}
+	if len(a.Questions[36].Options) != 7 || a.Questions[36].Section != "Seven" {
+		t.Fatalf("seven-option question %+v", a.Questions[36])
+	}
+}
+
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }

@@ -1,14 +1,14 @@
 # OCR / OpenAI 协议大模型：实际接入步骤
 
-> 先讲清现状：文本大模型已实现 OpenAI-compatible Chat Completions 直连；原卷 OCR 和答题卡识别目前实现的是通用网关协议，**尚未内置某家 OCR 厂商原生 SDK**。不需要在 VPS 自部署模型。不能把“已配置”当成“已连通”或“识别已验收”。
+> v0.2 已支持 **Ollama原生图像OCR**：后台选类型、填基址与模型、密钥可空；PDF由浏览器按页转换。文本分析用OpenAI-compatible Chat Completions。新学号标准卡内置浏览器OMR+Go复核，无需CARD。旧网关兼容，腾讯云等厂商SDK仍未内置。见 [v0.2操作说明](<RELEASE_V02.md>)。
 
 ## 1. 三项服务分别做什么
 
 | 服务 | 用途 | 当前可直接填什么 |
 |---|---|---|
 | AI 文本大模型 | 把 OCR 文本整理为题号、题型、分值、答案候选 | 支持 Chat Completions 和 JSON 输出的 OpenAI-compatible 基址、密钥、模型名 |
-| 原卷 OCR | PDF → 文字，保留题号、分值与页码 | 实现本系统原始 PDF 请求 / text+pages 响应的网关；普通厂商接口需适配 |
-| 答题卡识别 | 卡片图 → 个人卡 token + 每题填涂结果 | 实现 card-v1 的专用识别网关；不是仅凭普通文字 OCR 就能完成 |
+| 原卷 OCR | PDF页图片／图片 → 文字和LaTeX | Ollama原生基址+模型，或兼容自定义网关 |
+| 新答题卡识别 | 单卡图 → 学号+每题选项 | a5-v2内置OMR，无需模型或CARD URL；二维码仅考试ID |
 
 上述 AI 配置不会自动开启 PDF 视觉识别。当前系统不把 PDF 当文本发给 /chat/completions，也没有把答题卡图送给文本模型猜填涂。模型能读图不等于当前适配器已支持其多模态协议。
 
@@ -23,7 +23,7 @@
 5. 保存成功后 API 和 Worker **下一次云端调用读取最新配置**，不需重启容器、重新打包或修改部署文件。已经发出的请求使用原配置继续执行，不强行中断。
 6. 点击“测试已保存配置”显式检查地址/鉴权。AI 使用 GET /models，OCR / 卡网关使用 HEAD，限时8秒，不上传试卷、不请求模型推理。405代表接口可达但不支持此探测，不等于识别失败。通过也不证明模型ID、JSON推理协议和识别准确率已验收。
 
-URL只允许HTTPS，loopback测试服务可HTTP；拒绝URL中内嵌用户密码、query和fragment，密钥必须放独立字段。不要仅为消除“未配置”提示而填一个未适配地址。
+默认URL只允许HTTPS；Ollama额外允许私有LAN／CGNAT literal IP的HTTP，loopback测试也可HTTP；拒绝URL中内嵌用户密码、query和fragment，密钥必须放独立字段。不要仅为消除“未配置”提示而填一个未适配地址。
 
 ### 首次部署仍需一个应用加密主密钥
 
@@ -86,7 +86,13 @@ OCR_ENDPOINT/OCR_API_KEY、AI_BASE_URL/AI_API_KEY/AI_MODEL、CARD_ENDPOINT/CARD_
 
 100 score_units = 1分。云端输出只作为候选，不直接生成正式分数。
 
-## 4. OCR 不能直接填任意厂商地址
+## 4. Ollama原生与旧网关
+
+### Ollama原生（推荐）
+后台OCR类型选Ollama，地址填自己的HTTPS DDNS基址，不加/api/chat；模型名填NAS实际完整名字。默认地址为空，不预置NAS IP。原生Ollama通常没有API密钥，可以留空；反代增加Bearer才填。PDF在浏览器点击准备页面，逐页上传后解析；失败显式重试复用已完成页，页面显示Markdown与LaTeX。
+
+### 自定义网关（兼容）
+
 
 当前原卷OCR网关请求为：POST OCR_ENDPOINT，Content-Type: application/pdf，请求体为 PDF 二进制，Bearer OCR_API_KEY（若设置）。返回：
 
@@ -98,7 +104,12 @@ OCR_ENDPOINT/OCR_API_KEY、AI_BASE_URL/AI_API_KEY/AI_MODEL、CARD_ENDPOINT/CARD_
 
 不建议为此在2C4G机器再部署Python模型；优先在Go中做轻量HTTP适配，计算仍在云端。
 
-## 5. 连续阅卡还需要独立识别适配
+## 5. 连续阅卡：新学号卡内置OMR
+
+新发布a5-v2，A4上下双联裁开后单卡扫描：浏览器Web Worker预读学号/选项，Go独立复核计分，不调用OCR／AI／CARD。学号数字等宽并保留前导零；二维码全班同考试ID，不校验学生。填错另一合法学号无法凭二维码发现，需教师对账。
+
+以下仅适用于旧a4-v1／第三方识别网关兼容路径：
+
 
 CARD_ENDPOINT 接收 multipart image + template，响应 token、每题 selected / state / confidence，详情见云端接口契约。
 
