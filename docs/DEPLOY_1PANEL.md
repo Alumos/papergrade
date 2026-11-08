@@ -111,3 +111,51 @@ curl -s http://127.0.0.1:10086/readyz
 ```
 
 `readyz` 返回 `{"status":"ready","storage_mode":"sqlite"}` 说明服务正常，问题只在前端访问方式。
+
+
+## 反代已配置但仍打不开：区分两种现象
+
+### 现象 A：浏览器显示 502 / 连接被拒绝
+
+说明 OpenResty 没连上后端。在**宿主机**执行：
+
+```sh
+curl -I http://127.0.0.1:10086/
+docker ps --filter name=papergrade --format "{{.Names}} {{.Status}} {{.Ports}}"
+```
+
+- `curl` 正常返回 200 或 302，但网站报 502 → OpenResty 与宿主机网络不通，见下面「容器里的 127.0.0.1」。
+- `curl` 也失败 → 容器没起来或端口没映射，看 `docker logs papergrade-gateway`。
+
+### 容器里的 127.0.0.1
+
+1Panel 的 OpenResty 通常也跑在容器里。对那个容器来说，`127.0.0.1` 指它自己，不是宿主机，所以代理到 `http://127.0.0.1:10086` 会失败。两种改法：
+
+**改法一（推荐）**：把 gateway 发布到所有网卡，反代改指向宿主机地址。
+
+```yaml
+  gateway:
+    ports:
+      - "10086:8090"          # 去掉 127.0.0.1 前缀
+```
+
+反代地址改成 `http://172.17.0.1:10086`（Docker 默认网桥网关）或宿主机的内网 IP。
+
+**改法二**：让 gateway 直接用宿主机网络，反代继续用 `127.0.0.1`。
+
+```yaml
+  gateway:
+    network_mode: host
+    environment:
+      DOMAIN: ":10086"        # 直接监听宿主机 10086
+    # 删除 ports 与 networks 两段
+```
+
+### 现象 B：页面能打开，但登录后马上又变回登录页 / 登录报错
+
+说明 `PUBLIC_ORIGIN` 与你实际访问的地址不一致。应用会校验浏览器发来的 `Origin`，不一致直接返回 403 `CSRF_ORIGIN`；生产模式的 Cookie 带 `Secure`，纯 HTTP 下浏览器不保存。
+
+把编排里的 `PUBLIC_ORIGIN` 改成你**实际在浏览器地址栏里看到的**地址，例如 `https://grade.example.com`，注意：
+
+- 必须带 `https://`，结尾不能有斜杠；
+- 不能写成 `https://www.xxx.com` 却用 `https://xxx.com` 访问，两者算不同来源。
