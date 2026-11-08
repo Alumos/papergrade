@@ -15,8 +15,8 @@ const (
 	englishPitchY     = 4.2 // option row pitch in mm
 	englishPitchX     = 9.0 // question column pitch in mm
 	englishGroupGap   = 2.5 // extra gap after every five questions
-	englishBandStart  = 64.0
-	englishBandGap    = 10.0 // headers plus spacing between option stacks
+	englishBandStart  = 62.0
+	englishBandGap    = 11.0 // headers plus spacing between option stacks
 	englishBottomEdge = 134.0
 )
 
