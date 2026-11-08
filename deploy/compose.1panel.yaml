@@ -1,17 +1,18 @@
-# Papergrade 阅卷系统 · 1Panel 编排
+# Papergrade 阅卷系统 · 1Panel 编排（SQLite 单文件，无数据库服务）
 # 粘贴到 1Panel「容器 -> 编排 -> 创建编排」。
-# 只需替换 5 处：数据库密码（两处必须一致）、加密主密钥、管理员密码、访问域名。
+# 只需替换 4 处：加密主密钥、管理员密码、访问域名。
 # 生成随机值：openssl rand -hex 32
 name: papergrade
 
 x-app-env: &app-env
   SERVER_ADDR: ":8080"
-  DATABASE_URL: "postgres://papergrade:CHANGE_ME_DB_PASSWORD@postgres:5432/papergrade?sslmode=disable"
+  SQLITE_PATH: /app/data/papergrade.db
   DATA_DIR: /app/data
   APP_ENCRYPTION_KEY: "CHANGE_ME_ENCRYPTION_KEY"
   ADMIN_USERNAME: "teacher"
   ADMIN_PASSWORD: "CHANGE_ME_ADMIN_PASSWORD"
   DEV_MODE: "false"
+  # 浏览器实际访问的 https 地址，结尾不要带斜杠
   PUBLIC_ORIGIN: "https://exam.example.com"
   GOMAXPROCS: "1"
 
@@ -22,53 +23,8 @@ x-log: &logging
     max-file: "3"
 
 services:
-  postgres:
-    image: postgres:17.6-bookworm
-    container_name: papergrade-postgres
-    environment:
-      POSTGRES_USER: papergrade
-      POSTGRES_DB: papergrade
-      POSTGRES_PASSWORD: "CHANGE_ME_DB_PASSWORD"
-    command:
-      - postgres
-      - -c
-      - shared_buffers=32MB
-      - -c
-      - work_mem=2MB
-      - -c
-      - maintenance_work_mem=32MB
-      - -c
-      - max_connections=12
-      - -c
-      - max_parallel_workers_per_gather=0
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    shm_size: 128m
-    mem_limit: 256m
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U papergrade -d papergrade"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-    logging: *logging
-    networks: [database]
-
-  # 一次性建表；成功退出后 api/worker 才会启动
-  migrate:
-    image: ghcr.io/alumos/papergrade:0.2.1
-    container_name: papergrade-migrate
-    command: ["migrate"]
-    environment: *app-env
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: "no"
-    logging: *logging
-    networks: [database]
-
   api:
-    image: ghcr.io/alumos/papergrade:0.2.1
+    image: ghcr.io/alumos/papergrade:0.2.2
     container_name: papergrade-api
     command: ["api"]
     environment:
@@ -91,22 +47,16 @@ services:
       timeout: 4s
       start_period: 20s
       retries: 3
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
     logging: *logging
-    networks: [database, edge]
+    networks: [edge]
 
   worker:
-    image: ghcr.io/alumos/papergrade:0.2.1
+    image: ghcr.io/alumos/papergrade:0.2.2
     container_name: papergrade-worker
     command: ["worker"]
     environment:
       <<: *app-env
       GOMEMLIMIT: 128MiB
-      DB_MAX_CONNS: "1"
     volumes:
       - evidence:/app/data
     tmpfs:
@@ -119,17 +69,13 @@ services:
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
     stop_grace_period: 30s
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+    depends_on: [api]
     logging: *logging
-    networks: [database, edge]
+    networks: [edge]
 
   # 容器内 8090 纯 HTTP；HTTPS 由 1Panel 网站反向代理负责
   gateway:
-    image: ghcr.io/alumos/papergrade:0.2.1-gateway
+    image: ghcr.io/alumos/papergrade:0.2.2-gateway
     container_name: papergrade-gateway
     environment:
       DOMAIN: ":8090"
@@ -142,10 +88,7 @@ services:
     networks: [edge]
 
 volumes:
-  pgdata:
   evidence:
 
 networks:
-  database:
-    internal: true
   edge:

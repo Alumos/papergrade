@@ -23,13 +23,25 @@ import (
 )
 
 type Config struct {
-	Addr, DatabaseURL, DataDir, Username, Password, PublicOrigin string
-	EncryptionKey                                                string
-	Dev                                                          bool
+	Addr, DataDir, Username, Password, PublicOrigin string
+	EncryptionKey                                   string
+	// SQLitePath is the single database file. Empty means the ephemeral
+	// development memory store, which is never used in production.
+	SQLitePath string
+	Dev        bool
+}
+
+// StoreURL is what the store package opens: sqlite:<path>, or empty for the
+// ephemeral development memory store. There is no database server.
+func (c Config) StoreURL() string {
+	if c.SQLitePath != "" {
+		return "sqlite:" + c.SQLitePath
+	}
+	return ""
 }
 
 func ConfigFromEnv() Config {
-	c := Config{Addr: os.Getenv("SERVER_ADDR"), DatabaseURL: os.Getenv("DATABASE_URL"), DataDir: os.Getenv("DATA_DIR"), Username: os.Getenv("ADMIN_USERNAME"), Password: os.Getenv("ADMIN_PASSWORD"), PublicOrigin: os.Getenv("PUBLIC_ORIGIN"), Dev: os.Getenv("DEV_MODE") == "true", EncryptionKey: os.Getenv("APP_ENCRYPTION_KEY")}
+	c := Config{Addr: os.Getenv("SERVER_ADDR"), DataDir: os.Getenv("DATA_DIR"), Username: os.Getenv("ADMIN_USERNAME"), Password: os.Getenv("ADMIN_PASSWORD"), PublicOrigin: os.Getenv("PUBLIC_ORIGIN"), SQLitePath: os.Getenv("SQLITE_PATH"), Dev: os.Getenv("DEV_MODE") == "true", EncryptionKey: os.Getenv("APP_ENCRYPTION_KEY")}
 	if c.Addr == "" {
 		c.Addr = ":8080"
 	}
@@ -66,8 +78,8 @@ type attempt struct {
 }
 
 func New(ctx context.Context, c Config) (*App, error) {
-	if c.DatabaseURL == "" && !c.Dev {
-		return nil, fmt.Errorf("DATABASE_URL required unless DEV_MODE=true (ephemeral memory)")
+	if c.StoreURL() == "" && !c.Dev {
+		return nil, fmt.Errorf("SQLITE_PATH required unless DEV_MODE=true (ephemeral memory)")
 	}
 	if c.Username == "" || len(c.Password) < 12 || len(c.Password) > 72 {
 		return nil, fmt.Errorf("ADMIN_USERNAME and ADMIN_PASSWORD (12–72 bytes) required")
@@ -89,13 +101,21 @@ func New(ctx context.Context, c Config) (*App, error) {
 			return nil, fmt.Errorf("PUBLIC_ORIGIN must be an https origin in production")
 		}
 	}
-	providerCipher, ephemeral, e := setupEncryption(c.EncryptionKey, c.Dev, c.DatabaseURL == "")
+	providerCipher, ephemeral, e := setupEncryption(c.EncryptionKey, c.Dev, c.StoreURL() == "")
 	if e != nil {
 		return nil, e
 	}
-	s, e := store.Open(ctx, c.DatabaseURL)
+	s, e := store.Open(ctx, c.StoreURL())
 	if e != nil {
 		return nil, e
+	}
+	// The SQLite schema is a set of IF NOT EXISTS statements, so creating it on
+	// every start is the migration: no separate migrate container is needed.
+	if s.Mode() == "sqlite" {
+		if e = s.Migrate(ctx); e != nil {
+			s.Close()
+			return nil, e
+		}
 	}
 	a := &App{Store: s, Config: c, failures: map[string]attempt{}, heavy: make(chan struct{}, 1), ocrSlot: make(chan struct{}, 1), loginSlot: make(chan struct{}, 1), providerCipher: providerCipher, ephemeralProviderKey: ephemeral}
 	if e = os.MkdirAll(c.DataDir, 0700); e != nil {

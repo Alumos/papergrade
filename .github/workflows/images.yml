@@ -12,18 +12,6 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17.6-bookworm
-        env:
-          POSTGRES_USER: papergrade
-          POSTGRES_DB: papergrade_test
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports: ["5432:5432"]
-        options: --health-cmd "pg_isready -U papergrade -d papergrade_test" --health-interval 5s --health-timeout 3s --health-retries 10
-    env:
-      APP_ENCRYPTION_KEY: ci-only-disposable-settings-key-not-for-production
-      TEST_DATABASE_URL: postgres://papergrade@localhost:5432/papergrade_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - name: Test backend before publishing
@@ -41,12 +29,11 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile && pnpm run test && pnpm run build
         working-directory: web
-      - name: Test OCR to two-up student OMR with PostgreSQL
+      - name: Test OCR to two-up student OMR on the SQLite store
         run: |
           go build -trimpath -o /tmp/papergrade-e2e ./cmd/papergrade
           go build -trimpath -o /tmp/papergrade-card-fixture ./scripts/card-fixture
-          go build -trimpath -o /tmp/papergrade-db-sandbox ./scripts/db-sandbox
-          PAPERGRADE_BINARY=/tmp/papergrade-e2e CARD_FIXTURE_BINARY=/tmp/papergrade-card-fixture DB_SANDBOX_BINARY=/tmp/papergrade-db-sandbox node scripts/v02-e2e.mjs
+          PAPERGRADE_BINARY=/tmp/papergrade-e2e CARD_FIXTURE_BINARY=/tmp/papergrade-card-fixture node scripts/v02-e2e.mjs
       - name: Normalize registry image name
         id: names
         env:

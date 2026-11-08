@@ -1,6 +1,6 @@
 # Papergrade · 智能阅卷
 
-面向教师手机的智能阅卷平台 v0.2 试点版。Go 后端、React / Vite 静态前端、官方 shadcn/ui（CLI 4.23.0，radix-nova / neutral）、PostgreSQL、Docker Compose。
+面向教师手机的智能阅卷平台 v0.2 试点版。Go 后端、React / Vite 静态前端、官方 shadcn/ui（CLI 4.23.0，radix-nova / neutral）、单文件 SQLite、Docker Compose。
 
 **原卷OCR在NAS／云端，标准卡用OMR。** 手机负责PDF分页、视频门控和Worker填涂预识别；Go独立复核选中单卡的学号与答案、计分入库。不上传视频，不自建OCR／LLM，不在VPS渲染PDF。
 
@@ -13,14 +13,14 @@
 - 单选、多选、判断的确定性整数评分、复核历史、防重复和冲突不覆盖。
 - PDF/图片原件入库，浏览器PDF.js逐页准备；后台Ollama原生OCR可选密钥/可改DDNS/默认空地址，页进度与显式恢复，Markdown／LaTeX与OpenAI候选确认。
 - 标准答案纠错后版本化重评分，保留原发布模板、评分历史和待复核状态。
-- 持久任务队列、PostgreSQL独立实体存储、私有文件、统计与CSV。
+- 持久任务队列、单文件 SQLite 存储（无数据库服务）、私有文件、统计与CSV。
 - 手机连续相机门控、稳定选帧、IndexedDB恢复与事务后正式反馈（官方组件重建及基础业务浏览器联调已完成）。
 
 OCR未配置时解析真实返回不可用；新学号卡无需CARD或大模型，用浏览器OMR+Go复核。旧a4-v1保持兼容。付费AI、真实手机和实体2B卡准确率未验收前不称生产全面完成。
 
 ## 本地开发
 
-需要 Go 1.24+、Node.js 24 LTS、pnpm 11.7.0。生产需要PostgreSQL 17；没有DATABASE_URL时只允许显式DEV_MODE=true的临时内存模式，重启丢失，不用于真实成绩。
+需要 Go 1.24+、Node.js 24 LTS、pnpm 11.7.0。生产只需设置 SQLITE_PATH 指向一个数据库文件，首次启动自动建表；没有 SQLITE_PATH 时只允许显式 DEV_MODE=true 的临时内存模式，重启丢失，不用于真实成绩。
 
 ~~~sh
 # 在papergrade根目录；先设置临时开发凭据（12–72字节）
@@ -39,7 +39,7 @@ pnpm run dev
 
 Vite仅供localhost开发，/api代理到8080。访问http://localhost:5173。手机远程相机需HTTPS，不能把本机页面能打开当成手机取流已验证。
 
-生产不启DEV_MODE，必须设置DATABASE_URL、PUBLIC_ORIGIN、账号、强密码及稳定APP_ENCRYPTION_KEY（openssl rand -hex 32生成一次，单独备份）。OCR/AI/答题卡模型配置登录后在“模型与接口”修改，日常保存无需重启。API/Worker共享私有证据目录，首次先migrate再启动；生产有独立Worker，内存开发模式不能跨进程共享数据。
+生产不启DEV_MODE，必须设置 SQLITE_PATH、PUBLIC_ORIGIN、账号、强密码及稳定 APP_ENCRYPTION_KEY（openssl rand -hex 32 生成一次，单独备份）。OCR/AI/答题卡模型配置登录后在“模型与接口”修改，日常保存无需重启。API/Worker 共享同一个 SQLite 文件与证据目录，首次启动自动建表；生产有独立 Worker，内存开发模式不能跨进程共享数据。
 
 ## 文档
 
@@ -56,9 +56,9 @@ Vite仅供localhost开发，/api代理到8080。访问http://localhost:5173。�
 
 ## Docker / GitHub Actions
 
-四个常驻服务：HTTPS静态网关、Go API、轻量Worker、PostgreSQL。无Node生产运行时、无Redis/MinIO。容器内存上限合计640MiB是故障保护，不是预分配、真实RSS或资源达标证明。生产镜像不包含本地OCR模型/PDF工具。
+三个常驻服务：HTTPS静态网关、Go API、轻量Worker，加一个 SQLite 数据卷。无数据库容器、无Node生产运行时、无Redis/MinIO。容器内存上限合计约450MiB是故障保护，不是预分配、真实RSS或资源达标证明。生产镜像不包含本地OCR模型/PDF工具。
 
-代码仓库：[Alumos/papergrade](https://github.com/Alumos/papergrade)。推送 main 自动执行 Go / PostgreSQL 与前端测试、Docker 构建及一次性容器检查；发布 v* 标签或手动运行 Publish Docker images 时构建并推送 GHCR 的 linux/amd64、linux/arm64 镜像。当前构建状态见 [GitHub Actions](https://github.com/Alumos/papergrade/actions)，不能把代码已上传当作镜像已发布。开发主机无 Docker，容器运行以 CI / 目标 VPS 的真实结果为准。
+代码仓库：[Alumos/papergrade](https://github.com/Alumos/papergrade)。推送 main 自动执行 Go / SQLite 与前端测试、Docker 构建及一次性容器检查；发布 v* 标签或手动运行 Publish Docker images 时构建并推送 GHCR 的 linux/amd64、linux/arm64 镜像。当前构建状态见 [GitHub Actions](https://github.com/Alumos/papergrade/actions)，不能把代码已上传当作镜像已发布。开发主机无 Docker，容器运行以 CI / 目标 VPS 的真实结果为准。
 
 ## 明确首版边界
 

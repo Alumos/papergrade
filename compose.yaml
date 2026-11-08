@@ -1,7 +1,9 @@
+# 单文件 SQLite 部署：没有数据库容器，一个卷同时保存数据库与证据文件。
 name: papergrade
+
 x-app-env: &app-env
   SERVER_ADDR: ":8080"
-  DATABASE_URL: "postgres://papergrade:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/papergrade?sslmode=disable"
+  SQLITE_PATH: /app/data/papergrade.db
   DATA_DIR: /app/data
   APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Set a stable APP_ENCRYPTION_KEY (openssl rand -hex 32)}
   ADMIN_USERNAME: ${ADMIN_USERNAME:-teacher}
@@ -9,39 +11,14 @@ x-app-env: &app-env
   DEV_MODE: "false"
   PUBLIC_ORIGIN: "https://${DOMAIN:?Set DOMAIN}"
   GOMAXPROCS: "1"
-  OCR_ENDPOINT: ${OCR_ENDPOINT:-}
-  OCR_API_KEY: ${OCR_API_KEY:-}
-  AI_BASE_URL: ${AI_BASE_URL:-}
-  AI_API_KEY: ${AI_API_KEY:-}
-  AI_MODEL: ${AI_MODEL:-}
-  CARD_ENDPOINT: ${CARD_ENDPOINT:-}
-  CARD_API_KEY: ${CARD_API_KEY:-}
-  LOCAL_OMR_ENABLED: "false"
+
 x-log: &logging
   driver: json-file
   options:
     max-size: "10m"
     max-file: "3"
+
 services:
-  postgres:
-    image: postgres:17.6-bookworm
-    environment:
-      POSTGRES_USER: papergrade
-      POSTGRES_DB: papergrade
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-    command: ["postgres", "-c", "shared_buffers=32MB", "-c", "work_mem=2MB", "-c", "maintenance_work_mem=32MB", "-c", "max_connections=12", "-c", "max_parallel_workers_per_gather=0"]
-    volumes: ["pgdata:/var/lib/postgresql/data"]
-    shm_size: 128m
-    mem_limit: 256m
-    cpu_shares: 768
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U papergrade -d papergrade"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-    logging: *logging
-    networks: [database]
   api:
     image: ${IMAGE:-papergrade:local}
     build: {context: ., target: app}
@@ -51,8 +28,7 @@ services:
       GOMEMLIMIT: 96MiB
     volumes: ["evidence:/app/data"]
     tmpfs: ["/tmp:size=32m,mode=1777"]
-    mem_limit: 128m
-    cpu_shares: 1024
+    mem_limit: 160m
     pids_limit: 128
     read_only: true
     cap_drop: [ALL]
@@ -65,10 +41,9 @@ services:
       timeout: 4s
       start_period: 15s
       retries: 3
-    depends_on:
-      postgres: {condition: service_healthy}
     logging: *logging
-    networks: [database, edge]
+    networks: [edge]
+
   worker:
     image: ${IMAGE:-papergrade:local}
     build: {context: ., target: app}
@@ -76,7 +51,6 @@ services:
     environment:
       <<: *app-env
       GOMEMLIMIT: 128MiB
-      DB_MAX_CONNS: "1"
     volumes: ["evidence:/app/data"]
     tmpfs: ["/tmp:size=64m,mode=1777"]
     mem_limit: 192m
@@ -87,10 +61,10 @@ services:
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
     stop_grace_period: 30s
-    depends_on:
-      postgres: {condition: service_healthy}
+    depends_on: [api]
     logging: *logging
-    networks: [database, edge]
+    networks: [edge]
+
   gateway:
     image: ${IMAGE:-papergrade:local}-gateway
     build: {context: ., target: gateway}
@@ -99,17 +73,15 @@ services:
     ports: ["80:80", "443:443", "443:443/udp"]
     volumes: ["caddydata:/data", "caddyconfig:/config"]
     mem_limit: 64m
-    cpu_shares: 256
     restart: unless-stopped
     depends_on: [api]
     logging: *logging
     networks: [edge]
+
 volumes:
-  pgdata:
   evidence:
   caddydata:
   caddyconfig:
+
 networks:
-  database:
-    internal: true
   edge:

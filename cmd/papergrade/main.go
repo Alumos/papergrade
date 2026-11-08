@@ -47,7 +47,7 @@ func run() error {
 		return nil
 	}
 	if command == "migrate" {
-		s, e := store.Open(ctx, os.Getenv("DATABASE_URL"))
+		s, e := store.Open(ctx, app.ConfigFromEnv().StoreURL())
 		if e != nil {
 			return e
 		}

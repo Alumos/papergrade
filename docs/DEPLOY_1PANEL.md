@@ -1,20 +1,19 @@
-# 1Panel 部署步骤
+# 1Panel 部署步骤（SQLite 单文件）
 
-编排文件：[deploy/compose.1panel.yaml](<../deploy/compose.1panel.yaml>)。
+编排文件：[deploy/compose.1panel.yaml](<../deploy/compose.1panel.yaml>)。没有数据库容器，整个系统只有 API、Worker、网关三个容器加一个数据卷。
 
-## 1. 先替换 5 处
+## 1. 先替换 4 处
 
 ```sh
-openssl rand -hex 32    # 生成随机密码/密钥
+openssl rand -hex 32    # 生成加密主密钥
 ```
 
 | 位置 | 改成 |
 |---|---|
-| `DATABASE_URL` 里的 `CHANGE_ME_DB_PASSWORD` | 随机数据库密码 |
-| `POSTGRES_PASSWORD` | **与上面完全相同的值** |
 | `APP_ENCRYPTION_KEY` | `openssl rand -hex 32` 的输出 |
 | `ADMIN_PASSWORD` | 你的登录密码，至少 12 位 |
 | `PUBLIC_ORIGIN` | 实际访问的 `https://域名`，结尾不带斜杠 |
+| `ADMIN_USERNAME` | 登录名，默认 `teacher` |
 
 `APP_ENCRYPTION_KEY` 一旦启用就**不能再改**：它解密后台保存的模型密钥，换了以后已存密钥全部读不出来。请单独抄一份备份。
 
@@ -22,7 +21,7 @@ openssl rand -hex 32    # 生成随机密码/密钥
 
 1Panel → 容器 → 编排 → 创建编排，名称 `papergrade`，粘贴 YAML，确认部署。
 
-启动顺序：postgres → migrate 建表 → api / worker → gateway。`migrate` 跑完会显示「已退出」，这是正常的，不要给它设自动重启。
+首次启动会自动建表（SQLite 的 `CREATE TABLE IF NOT EXISTS`），不需要单独的 migrate 步骤。数据库文件在数据卷里：`/app/data/papergrade.db`。
 
 ## 3. 配置反向代理
 
@@ -44,7 +43,7 @@ gateway 容器内部是纯 HTTP（`DOMAIN=":8090"` 只给端口，Caddy 不会�
 - **OCR**：类型选 Ollama；地址填 Ollama 基址（不带 `/api/chat`）；模型填 NAS 上实际的模型名；原生 Ollama 一般无密钥，留空。
 - **AI**：填 OpenAI 兼容基址（通常以 `/v1` 结尾）、模型名、密钥。
 
-保存后 API 与 Worker 立即生效，无需重启。模型地址与密钥加密存在数据库，不写进 compose。
+保存后 API 与 Worker 立即生效，无需重启。模型地址与密钥加密存在 SQLite 里，不写进 compose。
 
 ## 5. 验收
 
@@ -58,6 +57,13 @@ curl -s http://127.0.0.1:18080/readyz
 
 ## 6. 备份与升级
 
-必须备份三样：`pgdata` 卷、`evidence` 卷、`APP_ENCRYPTION_KEY`。
+备份只要三样：`evidence` 卷（里面有 `papergrade.db` 和证据图片）、`APP_ENCRYPTION_KEY`。
 
-升级：把两处镜像标签换成新版本号重新部署即可，**不要** `down -v`。
+```sh
+# 一致性备份数据库（容器内执行，避免直接拷贝正在写的文件）
+docker exec papergrade-api sh -c "ls /app/data"
+```
+
+最稳妥的做法是停掉 worker 与 api 再复制卷；数据量小，几秒钟即可。
+
+升级：把两处镜像标签换成新版本号重新部署即可，**不要**删除 `evidence` 卷。

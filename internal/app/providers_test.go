@@ -1,6 +1,7 @@
 package app
 
 import (
+	"path/filepath"
 	"context"
 	"encoding/json"
 	"github.com/papergrade/papergrade/internal/provider"
@@ -65,10 +66,10 @@ func TestProviderSettingsPersistAcrossRead(t *testing.T) {
 	}
 }
 func TestEncryptionKeyRequiredOutsideEphemeralDev(t *testing.T) {
-	if _, e := New(context.Background(), Config{Dev: false, DatabaseURL: "postgres://invalid", Username: "teacher", Password: "long-password-here", PublicOrigin: "https://grade.example"}); e == nil || !strings.Contains(e.Error(), "APP_ENCRYPTION_KEY") {
+	if _, e := New(context.Background(), Config{Dev: false, SQLitePath: filepath.Join(t.TempDir(), "k.db"), Username: "teacher", Password: "long-password-here", PublicOrigin: "https://grade.example"}); e == nil || !strings.Contains(e.Error(), "APP_ENCRYPTION_KEY") {
 		t.Fatal("production key missing not rejected", e)
 	}
-	if _, e := New(context.Background(), Config{Dev: true, DatabaseURL: "postgres://invalid", Username: "teacher", Password: "long-password-here", PublicOrigin: "http://localhost"}); e == nil || !strings.Contains(e.Error(), "APP_ENCRYPTION_KEY") {
-		t.Fatal("dev postgres key missing not rejected", e)
+	if _, e := New(context.Background(), Config{Dev: true, SQLitePath: filepath.Join(t.TempDir(), "k.db"), Username: "teacher", Password: "long-password-here", PublicOrigin: "http://localhost"}); e == nil || !strings.Contains(e.Error(), "APP_ENCRYPTION_KEY") {
+		t.Fatal("dev persistent key missing not rejected", e)
 	}
 }

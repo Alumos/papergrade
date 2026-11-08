@@ -12,17 +12,6 @@ concurrency:
 jobs:
   go:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17.6-bookworm
-        env:
-          POSTGRES_USER: papergrade
-          POSTGRES_HOST_AUTH_METHOD: trust
-          POSTGRES_DB: papergrade_test
-        ports: ["5432:5432"]
-        options: --health-cmd "pg_isready -U papergrade -d papergrade_test" --health-interval 5s --health-timeout 3s --health-retries 10
-    env:
-      TEST_DATABASE_URL: postgres://papergrade@localhost:5432/papergrade_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -35,12 +24,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-      - name: Test OCR to two-up student OMR with PostgreSQL
+      - name: Test OCR to two-up student OMR on the SQLite store
         run: |
           go build -trimpath -o /tmp/papergrade-e2e ./cmd/papergrade
           go build -trimpath -o /tmp/papergrade-card-fixture ./scripts/card-fixture
-          go build -trimpath -o /tmp/papergrade-db-sandbox ./scripts/db-sandbox
-          PAPERGRADE_BINARY=/tmp/papergrade-e2e CARD_FIXTURE_BINARY=/tmp/papergrade-card-fixture DB_SANDBOX_BINARY=/tmp/papergrade-db-sandbox node scripts/v02-e2e.mjs
+          PAPERGRADE_BINARY=/tmp/papergrade-e2e CARD_FIXTURE_BINARY=/tmp/papergrade-card-fixture node scripts/v02-e2e.mjs
+      - name: Check deployment guards
+        run: node scripts/check-config.mjs
   web:
     runs-on: ubuntu-latest
     steps:
@@ -91,9 +81,7 @@ jobs:
         env:
           IMAGE: papergrade:ci
         run: |
-          docker compose --project-name papergrade-ci --env-file .env.example up -d --wait postgres
-          docker compose --project-name papergrade-ci --env-file .env.example run --rm api migrate
-          docker compose --project-name papergrade-ci --env-file .env.example up -d --no-build --wait --wait-timeout 60 api worker
+          docker compose --project-name papergrade-ci --env-file .env.example up -d --no-build --wait --wait-timeout 90 api worker
           docker compose --project-name papergrade-ci --env-file .env.example exec -T api papergrade healthcheck
           docker run --rm papergrade:ci-gateway caddy validate --config /etc/caddy/Caddyfile
       - name: Collect container diagnostics

@@ -8,10 +8,13 @@ import {createServer} from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {deflateSync} from 'node:zlib';
-let db=process.env.TEST_DATABASE_URL;if(!db)throw Error('Use a disposable TEST_DATABASE_URL');
-const sandboxBinary=process.env.DB_SANDBOX_BINARY??'.cache/db-sandbox';
-const schema='v02_'+randomBytes(8).toString('hex');
-db=execFileSync(sandboxBinary,['-create',schema],{encoding:'utf8'});
+// The deployment target stores everything in one SQLite file, so this script
+// exercises that exact backend: real API and Worker processes, real files.
+const sqlitePath=path.resolve('.cache/v02-e2e/papergrade.db');
+await fs.mkdir(path.dirname(sqlitePath),{recursive:true});
+await fs.rm(sqlitePath,{force:true});
+await fs.rm(sqlitePath+'-wal',{force:true});
+await fs.rm(sqlitePath+'-shm',{force:true});
 const binary=process.env.PAPERGRADE_BINARY??'.cache/papergrade-dev';
 const fixtureBinary=process.env.CARD_FIXTURE_BINARY??'.cache/card-fixture';
 const base='http://127.0.0.1:8083',origin='https://v02.integration.invalid';
@@ -25,7 +28,7 @@ const fixture=createServer(async(req,res)=>{let body='';for await(const chunk of
  else{res.writeHead(404);res.end('{}');}
 });await new Promise(r=>fixture.listen(0,'127.0.0.1',r));const fake='http://127.0.0.1:'+fixture.address().port;
 const key='v02-disposable-settings-master-key-test-only';
-const env={...process.env,APP_ENCRYPTION_KEY:key,DATABASE_URL:db,ADMIN_USERNAME:'v02-test',ADMIN_PASSWORD:randomBytes(24).toString('hex'),PUBLIC_ORIGIN:origin,DEV_MODE:'false',DATA_DIR:output,SERVER_ADDR:'127.0.0.1:8083',DB_MAX_CONNS:'2',OCR_ENDPOINT:'',OCR_API_KEY:'',AI_BASE_URL:'',AI_API_KEY:'',AI_MODEL:'',CARD_ENDPOINT:'',CARD_API_KEY:''};
+const env={...process.env,APP_ENCRYPTION_KEY:key,SQLITE_PATH:sqlitePath,ADMIN_USERNAME:'v02-test',ADMIN_PASSWORD:randomBytes(24).toString('hex'),PUBLIC_ORIGIN:origin,DEV_MODE:'false',DATA_DIR:output,SERVER_ADDR:'127.0.0.1:8083',DB_MAX_CONNS:'2',OCR_ENDPOINT:'',OCR_API_KEY:'',AI_BASE_URL:'',AI_API_KEY:'',AI_MODEL:'',CARD_ENDPOINT:'',CARD_API_KEY:''};
 const children=[];let cookie='';
 function start(role){const p=spawn(binary,[role],{env,stdio:['ignore','ignore','pipe']});p.stderr.on('data',b=>{if(String(b).includes('ERROR'))process.stderr.write(b)});children.push(p);return p;}
 async function until(fn,ms=30000){const end=Date.now()+ms;let last;while(Date.now()<end){try{const v=await fn();if(v)return v;}catch(e){last=e;}await new Promise(r=>setTimeout(r,200));}throw last??Error('condition timeout');}
@@ -95,4 +98,4 @@ try{
  assert.equal(ecommit.score_units,ecommit.max_score_units,JSON.stringify(ecommit));
  await fs.writeFile(path.join(output,"integration.json"),JSON.stringify({exam_id:exam.id,release_id:exam.release_id,document_id:document.id,english_exam_id:eexam.id,english_capture_id:ecommit.capture_id,source:process.env.REAL_OLLAMA_URL?"real NAS Ollama; AI fixture":"Ollama+AI protocol fixtures",received:2,english_received:1,ocr_calls:ocrCalls,ai_calls:aiCalls},null,2));
  console.log('PASS v0.2: encrypted live Ollama settings -> persisted OCR -> OpenAI analysis -> explicit adoption/missing answer block -> teacher key -> a5-v2 -> shared exam QR A4 two-up -> actual student-number Go OMR0001+0002 -> idempotent scores -> regrade -> restart persistence -> English a5-v4 60-question ABC/ABCD/A-G horizontal-row card -> real-pixel Go OMR 1932 full marks. AI uses an HTTP fixture, not a real paid provider.');
-}finally{for(const p of children)if(p.exitCode===null){p.kill('SIGTERM');await Promise.race([new Promise(r=>p.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);if(p.exitCode===null)p.kill('SIGKILL')}await new Promise(r=>fixture.close(r));execFileSync(sandboxBinary,['-drop',schema],{stdio:'pipe'});}
+}finally{for(const p of children)if(p.exitCode===null){p.kill('SIGTERM');await Promise.race([new Promise(r=>p.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);if(p.exitCode===null)p.kill('SIGKILL')}await new Promise(r=>fixture.close(r));}

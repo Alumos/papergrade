@@ -2,9 +2,9 @@
 
 ## 资源原则
 
-VPS不是此平台独占。默认云端OCR/答题卡识别/AI，本机不装模型、不装PDF渲染器、不接视频。Node仅CI构建，线上静态文件；Go API/轻量任务Worker/PostgreSQL/HTTPS网关，无Redis、MinIO、消息中间件。
+VPS不是此平台独占。默认云端OCR/答题卡识别/AI，本机不装模型、不装PDF渲染器、不接视频。Node仅CI构建，线上静态文件；Go API/轻量任务Worker/单文件SQLite/HTTPS网关，无数据库服务、无Redis、MinIO、消息中间件。
 
-当前Compose保险上限：网关64MiB、API128MiB、Worker192MiB、PostgreSQL256MiB，总640MiB。这是容器硬帽，不是预分配或已测日常占用；进程、页缓存、Docker与OS仍有额外开销，文件上传和云端并发会临时增长。不能承诺总RSS几十MB。上线需记录空闲和峰值，再决定是否上调安全帽；不要为了数字压到频繁GC/OOM。
+当前Compose保险上限：网关64MiB、API160MiB、Worker192MiB，总约416MiB。没有数据库容器，SQLite 只占一个文件。这是容器硬帽，不是预分配或已测日常占用；进程、页缓存、Docker与OS仍有额外开销，文件上传和云端并发会临时增长。不能承诺总RSS几十MB。上线需记录空闲和峰值，再决定是否上调安全帽；不要为了数字压到频繁GC/OOM。
 
 Go软目标API96MiB、Worker128MiB；它不约束全部RSS/原生内存。PG shared_buffers32MB、work_mem2MB、max_connections12，应用池最小0、最大约3，任务低频自适应退避。Worker仅0.5核硬帽；在线进程用CPU权重而非严格切走大半机器，权重不是专属CPU保留。
 

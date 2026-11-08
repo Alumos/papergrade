@@ -4,14 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/jackc/pgx/v5"
 	"github.com/papergrade/papergrade/internal/store"
 	"log/slog"
 	"time"
 )
 
 func (a *App) Worker(ctx context.Context) error {
-	if a.Store.Pool == nil {
+	if a.Store.Mode() == "memory_dev" {
 		return fmt.Errorf("worker requires PostgreSQL; memory development processes cannot share state")
 	}
 	delay := time.Second
@@ -20,7 +19,7 @@ func (a *App) Worker(ctx context.Context) error {
 			return nil
 		}
 		job, e := a.Store.Claim(ctx)
-		if errors.Is(e, pgx.ErrNoRows) {
+		if errors.Is(e, store.ErrNoJob) {
 			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
