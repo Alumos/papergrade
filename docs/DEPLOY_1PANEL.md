@@ -67,3 +67,47 @@ docker exec papergrade-api sh -c "ls /app/data"
 最稳妥的做法是停掉 worker 与 api 再复制卷；数据量小，几秒钟即可。
 
 升级：把两处镜像标签换成新版本号重新部署即可，**不要**删除 `evidence` 卷。
+
+
+## 常见问题：用 `http://服务器IP:端口` 打不开或登录失败
+
+这不是部署失败，是设计上的限制，两个原因叠加：
+
+1. **端口只绑在 127.0.0.1**：编排里写的是 `"127.0.0.1:10086:8090"`，只允许本机访问。要对外监听得写成 `"10086:8090"`。
+2. **即使放开端口，登录也会失败**：
+   - 生产模式要求 `PUBLIC_ORIGIN` 是 `https://`，浏览器发来的 Origin 必须与它完全一致，否则返回 403 `CSRF_ORIGIN`；
+   - 生产模式的会话 Cookie 带 `Secure`，浏览器在纯 HTTP 下不会保存，登录后立刻又变成未登录。
+
+所以 `http://IP:端口` 这种方式**无法登录**，不是配置错了。
+
+### 正确做法：用域名 + HTTPS
+
+1Panel → 网站 → 创建网站（绑定域名、申请证书开启 HTTPS）→ 反向代理到 `http://127.0.0.1:10086`，发送域名 `$host`。然后把 `PUBLIC_ORIGIN` 改成 `https://你的域名`。
+
+### 临时自测：SSH 隧道
+
+如果只是想先在本地看一眼界面，不要暴露公网：
+
+```sh
+# 本机执行，把服务器的 10086 映射到本地
+ssh -L 10086:127.0.0.1:10086 root@你的服务器
+```
+
+然后浏览器打开 `http://localhost:10086`。但生产模式仍然要求 https，所以这种自测要把编排改成：
+
+```yaml
+  DEV_MODE: "true"
+  PUBLIC_ORIGIN: "http://localhost:10086"
+```
+
+`DEV_MODE=true` 只允许 loopback 来源、Cookie 不带 Secure，**仅供本机自测，测完改回去**。
+
+### 先确认容器真的起来了
+
+```sh
+docker ps --filter name=papergrade
+docker logs papergrade-api --tail 20
+curl -s http://127.0.0.1:10086/readyz
+```
+
+`readyz` 返回 `{"status":"ready","storage_mode":"sqlite"}` 说明服务正常，问题只在前端访问方式。
