@@ -1,7 +1,6 @@
 # Papergrade 阅卷系统 · 1Panel 编排
 # 粘贴到 1Panel「容器 -> 编排 -> 创建编排」。
-# 需要改的只有 5 处，都在下面标了 CHANGE_ME：
-#   1) 数据库密码（两处，必须一致）  2) 加密主密钥  3) 管理员密码  4) 访问域名
+# 只需替换 5 处：数据库密码（两处必须一致）、加密主密钥、管理员密码、访问域名。
 # 生成随机值：openssl rand -hex 32
 name: papergrade
 
@@ -13,7 +12,6 @@ x-app-env: &app-env
   ADMIN_USERNAME: "teacher"
   ADMIN_PASSWORD: "CHANGE_ME_ADMIN_PASSWORD"
   DEV_MODE: "false"
-  # 浏览器实际访问的 https 地址，结尾不要带斜杠
   PUBLIC_ORIGIN: "https://exam.example.com"
   GOMAXPROCS: "1"
 
@@ -134,7 +132,6 @@ services:
     image: ghcr.io/alumos/papergrade:0.2.1-gateway
     container_name: papergrade-gateway
     environment:
-      # 只写端口不写域名 = Caddy 不申请证书，只监听 HTTP
       DOMAIN: ":8090"
     ports:
       - "127.0.0.1:18080:8090"
